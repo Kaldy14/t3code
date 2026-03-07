@@ -1,3 +1,5 @@
+import * as os from "node:os";
+import * as path from "node:path";
 import { Encoding } from "effect";
 import { CheckpointRef, ProjectId, type ThreadId } from "@t3tools/contracts";
 
@@ -21,8 +23,18 @@ export function resolveThreadWorkspaceCwd(input: {
 }): string | undefined {
   const worktreeCwd = input.thread.worktreePath ?? undefined;
   if (worktreeCwd) {
-    return worktreeCwd;
+    return expandTilde(worktreeCwd);
   }
 
-  return input.projects.find((project) => project.id === input.thread.projectId)?.workspaceRoot;
+  const workspaceRoot = input.projects.find(
+    (project) => project.id === input.thread.projectId,
+  )?.workspaceRoot;
+  return workspaceRoot ? expandTilde(workspaceRoot) : undefined;
+}
+
+function expandTilde(filePath: string): string {
+  if (filePath.startsWith("~/") || filePath === "~") {
+    return path.join(os.homedir(), filePath.slice(1));
+  }
+  return filePath;
 }

@@ -20,6 +20,7 @@ import { ProviderHealth, type ProviderHealthShape } from "../Services/ProviderHe
 
 const DEFAULT_TIMEOUT_MS = 4_000;
 const CODEX_PROVIDER = "codex" as const;
+const CLAUDE_CODE_PROVIDER = "claudeCode" as const;
 
 // ── Pure helpers ────────────────────────────────────────────────────
 
@@ -290,14 +291,47 @@ export const checkCodexProviderStatus: Effect.Effect<
   } satisfies ServerProviderStatus;
 });
 
+// ── Claude Code health check ─────────────────────────────────────────
+
+export const checkClaudeCodeProviderStatus: Effect.Effect<
+  ServerProviderStatus,
+  never
+> = Effect.sync(() => {
+  const checkedAt = new Date().toISOString();
+  try {
+    // The adapter uses @anthropic-ai/claude-agent-sdk, not the CLI.
+    // Verify the SDK is resolvable at startup.
+    require.resolve("@anthropic-ai/claude-agent-sdk");
+    return {
+      provider: CLAUDE_CODE_PROVIDER,
+      status: "ready" as const,
+      available: true,
+      authStatus: "authenticated" as const,
+      checkedAt,
+    } satisfies ServerProviderStatus;
+  } catch {
+    return {
+      provider: CLAUDE_CODE_PROVIDER,
+      status: "error" as const,
+      available: false,
+      authStatus: "unknown" as const,
+      checkedAt,
+      message: "Claude Code SDK (@anthropic-ai/claude-agent-sdk) is not installed.",
+    } satisfies ServerProviderStatus;
+  }
+});
+
 // ── Layer ───────────────────────────────────────────────────────────
 
 export const ProviderHealthLive = Layer.effect(
   ProviderHealth,
   Effect.gen(function* () {
-    const codexStatus = yield* checkCodexProviderStatus;
+    const [codexStatus, claudeStatus] = yield* Effect.all(
+      [checkCodexProviderStatus, checkClaudeCodeProviderStatus],
+      { concurrency: "unbounded" },
+    );
     return {
-      getStatuses: Effect.succeed([codexStatus]),
+      getStatuses: Effect.succeed([codexStatus, claudeStatus]),
     } satisfies ProviderHealthShape;
   }),
 );

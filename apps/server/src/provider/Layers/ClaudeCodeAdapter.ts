@@ -1271,20 +1271,22 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
       });
 
     const runSdkStream = (context: ClaudeSessionContext): Effect.Effect<void> =>
-      Stream.fromAsyncIterable(context.query, (cause) => cause).pipe(
-        Stream.takeWhile(() => !context.stopped),
-        Stream.runForEach((message) => handleSdkMessage(context, message)),
-        Effect.catchCause((cause) =>
-          Effect.gen(function* () {
-            if (Cause.hasInterruptsOnly(cause) || context.stopped) {
-              return;
-            }
-            const message = toMessage(Cause.squash(cause), "Claude runtime stream failed.");
-            yield* emitRuntimeError(context, message, cause);
-            yield* completeTurn(context, "failed", message);
-          }),
-        ),
-      );
+      Effect.gen(function* () {
+        yield* Stream.fromAsyncIterable(context.query, (cause) => cause).pipe(
+          Stream.takeWhile(() => !context.stopped),
+          Stream.runForEach((message) => handleSdkMessage(context, message)),
+          Effect.catchCause((cause) =>
+            Effect.gen(function* () {
+              if (Cause.hasInterruptsOnly(cause) || context.stopped) {
+                return;
+              }
+              const message = toMessage(Cause.squash(cause), "Claude runtime stream failed.");
+              yield* emitRuntimeError(context, message, cause);
+              yield* completeTurn(context, "failed", message);
+            }),
+          ),
+        );
+      });
 
     const stopSessionInternal = (
       context: ClaudeSessionContext,
@@ -1392,10 +1394,10 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         const threadId = input.threadId;
 
         const promptQueue = yield* Queue.unbounded<PromptQueueItem>();
-        const prompt = Stream.fromQueue(promptQueue).pipe(
+        const prompt = yield* Stream.fromQueue(promptQueue).pipe(
           Stream.filter((item) => item.type === "message"),
           Stream.map((item) => item.message),
-          Stream.toAsyncIterable,
+          Stream.toAsyncIterableEffect,
         );
 
         const pendingApprovals = new Map<ApprovalRequestId, PendingApproval>();
@@ -1719,12 +1721,10 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         });
 
         const message = buildUserMessage(input);
-
         yield* Queue.offer(context.promptQueue, {
           type: "message",
           message,
         }).pipe(Effect.mapError((cause) => toRequestError(input.threadId, "turn/start", cause)));
-
         return {
           threadId: context.session.threadId,
           turnId,

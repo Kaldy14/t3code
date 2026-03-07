@@ -700,19 +700,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
   );
 
   const serverThread = threads.find((t) => t.id === threadId);
-  const fallbackDraftProject = projects.find((project) => project.id === draftThread?.projectId);
+  const fallbackDraftProject =
+    projects.find((project) => project.id === draftThread?.projectId) ?? projects[0] ?? null;
   const localDraftError = serverThread ? null : (localDraftErrorsByThreadId[threadId] ?? null);
   const localDraftThread = useMemo(
     () =>
       draftThread
         ? buildLocalDraftThread(
             threadId,
-            draftThread,
+            fallbackDraftProject
+              ? { ...draftThread, projectId: fallbackDraftProject.id }
+              : draftThread,
             fallbackDraftProject?.model ?? DEFAULT_MODEL,
             localDraftError,
           )
         : undefined,
-    [draftThread, fallbackDraftProject?.model, localDraftError, threadId],
+    [draftThread, fallbackDraftProject, localDraftError, threadId],
   );
   const activeThread = serverThread ?? localDraftThread;
   const runtimeMode = composerDraft.runtimeMode ?? activeThread?.runtimeMode ?? DEFAULT_RUNTIME_MODE;
@@ -759,7 +762,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const lockedProvider: ProviderKind | null = hasThreadStarted
     ? (sessionProvider ?? selectedProviderByThreadId ?? null)
     : null;
-  const selectedProvider: ProviderKind = lockedProvider ?? selectedProviderByThreadId ?? "codex";
+  const selectedProvider: ProviderKind = lockedProvider ?? selectedProviderByThreadId ?? "claudeCode";
   const cursorModelSelectionLockedReason =
     hasThreadStarted && selectedProvider === "cursor"
       ? "Cursor currently does not support changing models after the first message in a thread."
@@ -2356,6 +2359,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const onSend = async (e?: { preventDefault: () => void }) => {
     e?.preventDefault();
     const api = readNativeApi();
+    console.log("[ChatView] onSend called", {
+      hasApi: !!api,
+      hasActiveThread: !!activeThread,
+      isSendBusy,
+      isConnecting,
+      sendInFlight: sendInFlightRef.current,
+      activeThreadId: activeThread?.id,
+    });
     if (!api || !activeThread || isSendBusy || isConnecting || sendInFlightRef.current) return;
     if (activePendingProgress) {
       onAdvanceActivePendingUserInput();
@@ -2391,8 +2402,25 @@ export default function ChatView({ threadId }: ChatViewProps) {
       return;
     }
     if (!trimmed && composerImages.length === 0) return;
-    if (!activeProject) return;
+    if (!activeProject) {
+      console.error("[ChatView] onSend blocked: activeProject is undefined", {
+        threadId: activeThread?.id,
+        threadProjectId: activeThread?.projectId,
+        projectCount: projects.length,
+        projectIds: projects.map((p) => p.id),
+        isLocalDraft: isLocalDraftThread,
+        isServer: isServerThread,
+      });
+      return;
+    }
     const threadIdForSend = activeThread.id;
+    console.log("[ChatView] onSend past guards", {
+      projectId: activeProject.id,
+      isLocalDraft: isLocalDraftThread,
+      isServer: isServerThread,
+      envMode,
+      selectedProvider,
+    });
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
     const baseBranchForWorktree =
       isFirstMessage && envMode === "worktree" && !activeThread.worktreePath
@@ -2506,19 +2534,25 @@ export default function ChatView({ threadId }: ChatViewProps) {
         selectedModel || (activeProject.model as ModelSlug) || DEFAULT_MODEL;
 
       if (isLocalDraftThread) {
-        await api.orchestration.dispatchCommand({
-          type: "thread.create",
-          commandId: newCommandId(),
-          threadId: threadIdForSend,
-          projectId: activeProject.id,
-          title,
-          model: threadCreateModel,
-          runtimeMode,
-          interactionMode,
-          branch: nextThreadBranch,
-          worktreePath: nextThreadWorktreePath,
-          createdAt: activeThread.createdAt,
-        });
+        await api.orchestration
+          .dispatchCommand({
+            type: "thread.create",
+            commandId: newCommandId(),
+            threadId: threadIdForSend,
+            projectId: activeProject.id,
+            title,
+            model: threadCreateModel,
+            runtimeMode,
+            interactionMode,
+            branch: nextThreadBranch,
+            worktreePath: nextThreadWorktreePath,
+            createdAt: activeThread.createdAt,
+          })
+          .catch((err: unknown) => {
+            // Thread may already exist from a prior partial send — treat as success.
+            if (err instanceof Error && err.message.includes("already exists")) return;
+            throw err;
+          });
         createdServerThreadForLocalDraft = true;
       }
 
@@ -5284,7 +5318,7 @@ function isAvailableProviderOption(
   label: string;
   available: true;
 } {
-  return option.available && option.value !== "claudeCode";
+  return option.available;
 }
 
 const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);

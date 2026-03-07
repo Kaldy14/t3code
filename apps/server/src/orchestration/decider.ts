@@ -1,3 +1,5 @@
+import * as os from "node:os";
+import * as path from "node:path";
 import type {
   OrchestrationCommand,
   OrchestrationEvent,
@@ -76,7 +78,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           projectId: command.projectId,
           title: command.title,
-          workspaceRoot: command.workspaceRoot,
+          workspaceRoot: expandTilde(command.workspaceRoot),
           defaultModel: command.defaultModel ?? null,
           scripts: [],
           createdAt: command.createdAt,
@@ -103,7 +105,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         payload: {
           projectId: command.projectId,
           ...(command.title !== undefined ? { title: command.title } : {}),
-          ...(command.workspaceRoot !== undefined ? { workspaceRoot: command.workspaceRoot } : {}),
+          ...(command.workspaceRoot !== undefined ? { workspaceRoot: expandTilde(command.workspaceRoot) } : {}),
           ...(command.defaultModel !== undefined ? { defaultModel: command.defaultModel } : {}),
           ...(command.scripts !== undefined ? { scripts: command.scripts } : {}),
           updatedAt: occurredAt,
@@ -617,3 +619,10 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
   }
 });
+
+function expandTilde(filePath: string): string {
+  if (filePath.startsWith("~/") || filePath === "~") {
+    return path.join(os.homedir(), filePath.slice(1));
+  }
+  return filePath;
+}
