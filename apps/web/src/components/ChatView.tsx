@@ -5,7 +5,7 @@ import {
   EDITORS,
   type EditorId,
   type KeybindingCommand,
-  type CodexReasoningEffort,
+  type ProviderEffort,
   type CursorReasoningOption,
   type MessageId,
   type ProjectId,
@@ -122,8 +122,9 @@ import {
   summarizeTurnDiffStats,
   type TurnDiffTreeNode,
 } from "../lib/turnDiffTree";
-import BranchToolbar from "./BranchToolbar";
+import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
 import GitActionsControl from "./GitActionsControl";
+import { useBranchToolbar } from "./useBranchToolbar";
 import { SessionHud } from "./SessionHud";
 import {
   isOpenFavoriteEditorShortcut,
@@ -1051,14 +1052,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const selectedCodexFastModeEnabled =
     selectedProvider === "codex" ? composerDraft.codexFastMode : false;
   const selectedModelOptionsForDispatch = useMemo(() => {
-    if (selectedProvider !== "codex") {
-      return undefined;
+    if (selectedProvider === "codex") {
+      const codexOptions = {
+        ...(supportsReasoningEffort && selectedEffort ? { reasoningEffort: selectedEffort } : {}),
+        ...(selectedCodexFastModeEnabled ? { fastMode: true } : {}),
+      };
+      return Object.keys(codexOptions).length > 0 ? { codex: codexOptions } : undefined;
     }
-    const codexOptions = {
-      ...(supportsReasoningEffort && selectedEffort ? { reasoningEffort: selectedEffort } : {}),
-      ...(selectedCodexFastModeEnabled ? { fastMode: true } : {}),
-    };
-    return Object.keys(codexOptions).length > 0 ? { codex: codexOptions } : undefined;
+    if (selectedProvider === "claudeCode") {
+      const claudeOptions = {
+        ...(supportsReasoningEffort && selectedEffort ? { effort: selectedEffort } : {}),
+      };
+      return Object.keys(claudeOptions).length > 0 ? { claudeCode: claudeOptions } : undefined;
+    }
+    return undefined;
   }, [selectedCodexFastModeEnabled, selectedEffort, selectedProvider, supportsReasoningEffort]);
   const selectedCursorModel = useMemo(
     () => (selectedProvider === "cursor" ? parseCursorModelSelection(selectedModel) : null),
@@ -1578,6 +1585,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [activeProjectCwd, activeThreadWorktreePath]);
   // Default true while loading to avoid toolbar flicker.
   const isGitRepo = branchesQuery.data?.isRepo ?? true;
+  const branchToolbar = useBranchToolbar(threadId);
   const splitTerminalShortcutLabel = useMemo(
     () => shortcutLabelForCommand(keybindings, "terminal.split"),
     [keybindings],
@@ -3389,7 +3397,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [onProviderModelSelect, selectedModel, selectedProvider],
   );
   const onEffortSelect = useCallback(
-    (effort: CodexReasoningEffort) => {
+    (effort: ProviderEffort) => {
       setComposerDraftEffort(threadId, effort);
       scheduleComposerFocus();
     },
@@ -3968,16 +3976,25 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     onProviderModelChange={onProviderModelSelect}
                   />
 
-                  {selectedProvider === "codex" && selectedEffort != null ? (
+                  {supportsReasoningEffort && selectedEffort != null ? (
                     <>
                       <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
-                      <CodexTraitsPicker
-                        effort={selectedEffort}
-                        fastModeEnabled={selectedCodexFastModeEnabled}
-                        options={reasoningOptions}
-                        onEffortChange={onEffortSelect}
-                        onFastModeChange={onCodexFastModeChange}
-                      />
+                      {selectedProvider === "codex" ? (
+                        <CodexTraitsPicker
+                          effort={selectedEffort}
+                          fastModeEnabled={selectedCodexFastModeEnabled}
+                          options={reasoningOptions}
+                          onEffortChange={onEffortSelect}
+                          onFastModeChange={onCodexFastModeChange}
+                        />
+                      ) : (
+                        <EffortPicker
+                          effort={selectedEffort}
+                          options={reasoningOptions}
+                          defaultEffort={getDefaultReasoningEffort(selectedProvider)}
+                          onEffortChange={onEffortSelect}
+                        />
+                      )}
                     </>
                   ) : null}
 
@@ -4028,6 +4045,44 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       {runtimeMode === "full-access" ? "Full access" : "Supervised"}
                     </span>
                   </Button>
+
+                  {/* Env mode toggle (Local / New worktree) */}
+                  {isGitRepo && (
+                    <>
+                      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+                      {envLocked || activeWorktreePath ? (
+                        <span className="shrink-0 whitespace-nowrap px-2 text-sm text-muted-foreground/70 sm:px-3 sm:text-xs">
+                          {activeWorktreePath ? "Worktree" : "Local"}
+                        </span>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+                          size="sm"
+                          onClick={() => onEnvModeChange(envMode === "worktree" ? "local" : "worktree")}
+                        >
+                          {envMode === "worktree" ? "New worktree" : "Local"}
+                        </Button>
+                      )}
+                      {/* Branch selector */}
+                      {branchToolbar.isReady && branchToolbar.activeProjectCwd && (
+                        <>
+                          <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+                          <BranchToolbarBranchSelector
+                            activeProjectCwd={branchToolbar.activeProjectCwd}
+                            activeThreadBranch={branchToolbar.activeThreadBranch}
+                            activeWorktreePath={branchToolbar.activeWorktreePath}
+                            branchCwd={branchToolbar.branchCwd}
+                            effectiveEnvMode={branchToolbar.effectiveEnvMode}
+                            envLocked={envLocked}
+                            onSetThreadBranch={branchToolbar.setThreadBranch}
+                            onComposerFocusRequest={scheduleComposerFocus}
+                          />
+                        </>
+                      )}
+                    </>
+                  )}
                 </div>
 
                 {/* Right side: send / stop button */}
@@ -4191,14 +4246,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
               </div>
             )}
 
-            {isGitRepo && (
-              <BranchToolbar
-                threadId={activeThread.id}
-                onEnvModeChange={onEnvModeChange}
-                envLocked={envLocked}
-                onComposerFocusRequest={scheduleComposerFocus}
-              />
-            )}
           </div>
         </form>
       </div>
@@ -5892,23 +5939,24 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   );
 });
 
+const EFFORT_LABEL: Record<string, string> = {
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra High",
+};
+
 const CodexTraitsPicker = memo(function CodexTraitsPicker(props: {
-  effort: CodexReasoningEffort;
+  effort: ProviderEffort;
   fastModeEnabled: boolean;
-  options: ReadonlyArray<CodexReasoningEffort>;
-  onEffortChange: (effort: CodexReasoningEffort) => void;
+  options: ReadonlyArray<ProviderEffort>;
+  onEffortChange: (effort: ProviderEffort) => void;
   onFastModeChange: (enabled: boolean) => void;
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const defaultReasoningEffort = getDefaultReasoningEffort("codex");
-  const reasoningLabelByOption: Record<CodexReasoningEffort, string> = {
-    low: "Low",
-    medium: "Medium",
-    high: "High",
-    xhigh: "Extra High",
-  };
   const triggerLabel = [
-    reasoningLabelByOption[props.effort],
+    EFFORT_LABEL[props.effort] ?? props.effort,
     ...(props.fastModeEnabled ? ["Fast"] : []),
   ]
     .filter(Boolean)
@@ -5947,7 +5995,7 @@ const CodexTraitsPicker = memo(function CodexTraitsPicker(props: {
           >
             {props.options.map((effort) => (
               <MenuRadioItem key={effort} value={effort}>
-                {reasoningLabelByOption[effort]}
+                {EFFORT_LABEL[effort] ?? effort}
                 {effort === defaultReasoningEffort ? " (default)" : ""}
               </MenuRadioItem>
             ))}
@@ -5964,6 +6012,57 @@ const CodexTraitsPicker = memo(function CodexTraitsPicker(props: {
           >
             <MenuRadioItem value="off">off</MenuRadioItem>
             <MenuRadioItem value="on">on</MenuRadioItem>
+          </MenuRadioGroup>
+        </MenuGroup>
+      </MenuPopup>
+    </Menu>
+  );
+});
+
+const EffortPicker = memo(function EffortPicker(props: {
+  effort: ProviderEffort;
+  options: ReadonlyArray<ProviderEffort>;
+  defaultEffort: ProviderEffort | null;
+  onEffortChange: (effort: ProviderEffort) => void;
+}) {
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  return (
+    <Menu
+      open={isMenuOpen}
+      onOpenChange={(open) => {
+        setIsMenuOpen(open);
+      }}
+    >
+      <MenuTrigger
+        render={
+          <Button
+            size="sm"
+            variant="ghost"
+            className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+          />
+        }
+      >
+        <span>{EFFORT_LABEL[props.effort] ?? props.effort}</span>
+        <ChevronDownIcon aria-hidden="true" className="size-3 opacity-60" />
+      </MenuTrigger>
+      <MenuPopup align="start">
+        <MenuGroup>
+          <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Effort</div>
+          <MenuRadioGroup
+            value={props.effort}
+            onValueChange={(value) => {
+              if (!value) return;
+              const nextEffort = props.options.find((option) => option === value);
+              if (!nextEffort) return;
+              props.onEffortChange(nextEffort);
+            }}
+          >
+            {props.options.map((effort) => (
+              <MenuRadioItem key={effort} value={effort}>
+                {EFFORT_LABEL[effort] ?? effort}
+                {effort === props.defaultEffort ? " (default)" : ""}
+              </MenuRadioItem>
+            ))}
           </MenuRadioGroup>
         </MenuGroup>
       </MenuPopup>

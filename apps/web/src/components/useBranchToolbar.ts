@@ -6,23 +6,11 @@ import { readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useStore } from "../store";
 import {
-  EnvMode,
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
 } from "./BranchToolbar.logic";
-import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
 
-interface BranchToolbarProps {
-  threadId: ThreadId;
-  envLocked: boolean;
-  onComposerFocusRequest?: () => void;
-}
-
-export default function BranchToolbar({
-  threadId,
-  envLocked,
-  onComposerFocusRequest,
-}: BranchToolbarProps) {
+export function useBranchToolbar(threadId: ThreadId) {
   const threads = useStore((store) => store.threads);
   const projects = useStore((store) => store.projects);
   const setThreadBranchAction = useStore((store) => store.setThreadBranch);
@@ -95,20 +83,13 @@ export default function BranchToolbar({
     ],
   );
 
-  if (!activeThreadId || !activeProject) return null;
-
-  return (
-    <div className="flex items-center justify-end border-t border-border/40 px-3 pb-2 pt-1.5 sm:px-4">
-      <BranchToolbarBranchSelector
-        activeProjectCwd={activeProject.cwd}
-        activeThreadBranch={activeThreadBranch}
-        activeWorktreePath={activeWorktreePath}
-        branchCwd={branchCwd}
-        effectiveEnvMode={effectiveEnvMode}
-        envLocked={envLocked}
-        onSetThreadBranch={setThreadBranch}
-        {...(onComposerFocusRequest ? { onComposerFocusRequest } : {})}
-      />
-    </div>
-  );
+  return {
+    activeProjectCwd: activeProject?.cwd ?? null,
+    activeThreadBranch,
+    activeWorktreePath,
+    branchCwd,
+    effectiveEnvMode,
+    setThreadBranch,
+    isReady: activeThreadId != null && activeProject != null,
+  };
 }
