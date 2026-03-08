@@ -26,7 +26,7 @@ import { newCommandId, newProjectId, newThreadId } from "../lib/utils";
 import { useStore } from "../store";
 import { isChatNewLocalShortcut, isChatNewShortcut, shortcutLabelForCommand } from "../keybindings";
 import { type Thread } from "../types";
-import { derivePendingApprovals } from "../session-logic";
+import { derivePendingApprovals, derivePendingUserInputs } from "../session-logic";
 import { gitRemoveWorktreeMutationOptions, gitStatusQueryOptions } from "../lib/gitReactQuery";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
@@ -83,7 +83,7 @@ function formatRelativeTime(iso: string): string {
 }
 
 interface ThreadStatusPill {
-  label: "Working" | "Connecting" | "Completed" | "Pending Approval";
+  label: "Working" | "Connecting" | "Completed" | "Pending Approval" | "Needs Input";
   colorClass: string;
   dotClass: string;
   pulse: boolean;
@@ -115,10 +115,23 @@ function hasUnseenCompletion(thread: Thread): boolean {
   return completedAt > lastVisitedAt;
 }
 
-function threadStatusPill(thread: Thread, hasPendingApprovals: boolean): ThreadStatusPill | null {
+function threadStatusPill(
+  thread: Thread,
+  hasPendingApprovals: boolean,
+  hasPendingUserInput: boolean,
+): ThreadStatusPill | null {
   if (hasPendingApprovals) {
     return {
       label: "Pending Approval",
+      colorClass: "text-amber-600 dark:text-amber-300/90",
+      dotClass: "bg-amber-500 dark:bg-amber-300/90",
+      pulse: false,
+    };
+  }
+
+  if (hasPendingUserInput) {
+    return {
+      label: "Needs Input",
       colorClass: "text-amber-600 dark:text-amber-300/90",
       dotClass: "bg-amber-500 dark:bg-amber-300/90",
       pulse: false,
@@ -306,6 +319,13 @@ export default function Sidebar() {
     const map = new Map<ThreadId, boolean>();
     for (const thread of threads) {
       map.set(thread.id, derivePendingApprovals(thread.activities).length > 0);
+    }
+    return map;
+  }, [threads]);
+  const pendingUserInputByThreadId = useMemo(() => {
+    const map = new Map<ThreadId, boolean>();
+    for (const thread of threads) {
+      map.set(thread.id, derivePendingUserInputs(thread.activities).length > 0);
     }
     return map;
   }, [threads]);
@@ -1110,6 +1130,7 @@ export default function Sidebar() {
                           const threadStatus = threadStatusPill(
                             thread,
                             pendingApprovalByThreadId.get(thread.id) === true,
+                            pendingUserInputByThreadId.get(thread.id) === true,
                           );
                           const prStatus = prStatusIndicator(prByThreadId.get(thread.id) ?? null);
                           const terminalStatus = terminalStatusFromRunningIds(

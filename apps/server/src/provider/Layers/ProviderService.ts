@@ -20,6 +20,8 @@ import {
   ProviderStopSessionInput,
   type ProviderRuntimeEvent,
   type ProviderSession,
+  type McpServerStatus,
+  type McpSetServersResult,
 } from "@t3tools/contracts";
 import { Effect, Layer, Option, PubSub, Queue, Schema, SchemaIssue, Stream } from "effect";
 
@@ -493,6 +495,67 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         });
       });
 
+    const mcpGetStatus: ProviderServiceShape["mcpGetStatus"] = (threadId) =>
+      Effect.gen(function* () {
+        const routed = yield* resolveRoutableSession({
+          threadId,
+          operation: "ProviderService.mcpGetStatus",
+          allowRecovery: false,
+        });
+        if (routed.adapter.mcpGetStatus === undefined) {
+          return [];
+        }
+        return yield* routed.adapter.mcpGetStatus(threadId);
+      });
+
+    const mcpSetServers: ProviderServiceShape["mcpSetServers"] = (threadId, servers) =>
+      Effect.gen(function* () {
+        const routed = yield* resolveRoutableSession({
+          threadId,
+          operation: "ProviderService.mcpSetServers",
+          allowRecovery: false,
+        });
+        if (routed.adapter.mcpSetServers === undefined) {
+          return yield* toValidationError(
+            "ProviderService.mcpSetServers",
+            `Provider '${routed.adapter.provider}' does not support MCP server management.`,
+          );
+        }
+        return yield* routed.adapter.mcpSetServers(threadId, servers);
+      });
+
+    const mcpReconnectServer: ProviderServiceShape["mcpReconnectServer"] = (threadId, serverName) =>
+      Effect.gen(function* () {
+        const routed = yield* resolveRoutableSession({
+          threadId,
+          operation: "ProviderService.mcpReconnectServer",
+          allowRecovery: false,
+        });
+        if (routed.adapter.mcpReconnectServer === undefined) {
+          return yield* toValidationError(
+            "ProviderService.mcpReconnectServer",
+            `Provider '${routed.adapter.provider}' does not support MCP server management.`,
+          );
+        }
+        yield* routed.adapter.mcpReconnectServer(threadId, serverName);
+      });
+
+    const mcpToggleServer: ProviderServiceShape["mcpToggleServer"] = (threadId, serverName, enabled) =>
+      Effect.gen(function* () {
+        const routed = yield* resolveRoutableSession({
+          threadId,
+          operation: "ProviderService.mcpToggleServer",
+          allowRecovery: false,
+        });
+        if (routed.adapter.mcpToggleServer === undefined) {
+          return yield* toValidationError(
+            "ProviderService.mcpToggleServer",
+            `Provider '${routed.adapter.provider}' does not support MCP server management.`,
+          );
+        }
+        yield* routed.adapter.mcpToggleServer(threadId, serverName, enabled);
+      });
+
     const runStopAll = () =>
       Effect.gen(function* () {
         const threadIds = yield* directory.listThreadIds();
@@ -537,6 +600,10 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       getSlashCommands,
       getCachedSlashCommands,
       rollbackConversation,
+      mcpGetStatus,
+      mcpSetServers,
+      mcpReconnectServer,
+      mcpToggleServer,
       stopAll: runStopAll,
       streamEvents: Stream.fromPubSub(runtimeEventPubSub),
     } satisfies ProviderServiceShape;

@@ -91,7 +91,10 @@ import {
 import { AUTO_SCROLL_BOTTOM_THRESHOLD_PX, isScrollContainerNearBottom } from "../chat-scroll";
 import {
   buildPendingUserInputAnswers,
+  countAnsweredPendingUserInputQuestions,
   derivePendingUserInputProgress,
+  findFirstUnansweredPendingUserInputQuestionIndex,
+  resolvePendingUserInputAnswer,
   setPendingUserInputCustomAnswer,
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
@@ -126,6 +129,7 @@ import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
 import GitActionsControl from "./GitActionsControl";
 import { useBranchToolbar } from "./useBranchToolbar";
 import { SessionHud } from "./SessionHud";
+import { McpPanel } from "./McpPanel";
 import {
   isOpenFavoriteEditorShortcut,
   resolveShortcutCommand,
@@ -2663,7 +2667,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     const api = readNativeApi();
     if (!api || !activeThread || isSendBusy || isConnecting || sendInFlightRef.current) return;
     if (activePendingProgress) {
-      onAdvanceActivePendingUserInput();
+      onSubmitPendingUserInputAnswers();
       return;
     }
     const trimmed = prompt.trim();
@@ -3045,8 +3049,25 @@ export default function ChatView({ threadId }: ChatViewProps) {
       promptRef.current = "";
       setComposerCursor(0);
       setComposerTrigger(null);
+
+      // Auto-advance focus to the next unanswered question
+      const currentAnswers =
+        pendingUserInputAnswersByRequestId[activePendingUserInput.requestId] ?? {};
+      const updatedAnswers = {
+        ...currentAnswers,
+        [questionId]: { selectedOptionLabel: optionLabel, customAnswer: "" },
+      };
+      const nextIndex = findFirstUnansweredPendingUserInputQuestionIndex(
+        activePendingUserInput.questions,
+        updatedAnswers,
+      );
+      setActivePendingUserInputQuestionIndex(nextIndex);
     },
-    [activePendingUserInput],
+    [
+      activePendingUserInput,
+      pendingUserInputAnswersByRequestId,
+      setActivePendingUserInputQuestionIndex,
+    ],
   );
 
   const onChangeActivePendingUserInputCustomAnswer = useCallback(
@@ -3075,31 +3096,39 @@ export default function ChatView({ threadId }: ChatViewProps) {
     [activePendingUserInput],
   );
 
-  const onAdvanceActivePendingUserInput = useCallback(() => {
-    if (!activePendingUserInput || !activePendingProgress) {
+  const onSubmitPendingUserInputAnswers = useCallback(() => {
+    if (!activePendingUserInput || !activePendingResolvedAnswers || activePendingIsResponding) {
       return;
     }
-    if (activePendingProgress.isLastQuestion) {
-      if (activePendingResolvedAnswers) {
-        void onRespondToUserInput(activePendingUserInput.requestId, activePendingResolvedAnswers);
-      }
-      return;
-    }
-    setActivePendingUserInputQuestionIndex(activePendingProgress.questionIndex + 1);
+    void onRespondToUserInput(activePendingUserInput.requestId, activePendingResolvedAnswers);
   }, [
-    activePendingProgress,
-    activePendingResolvedAnswers,
     activePendingUserInput,
+    activePendingResolvedAnswers,
+    activePendingIsResponding,
     onRespondToUserInput,
-    setActivePendingUserInputQuestionIndex,
   ]);
 
-  const onPreviousActivePendingUserInputQuestion = useCallback(() => {
-    if (!activePendingProgress) {
-      return;
-    }
-    setActivePendingUserInputQuestionIndex(Math.max(activePendingProgress.questionIndex - 1, 0));
-  }, [activePendingProgress, setActivePendingUserInputQuestionIndex]);
+  const onDismissPendingUserInput = useCallback(() => {
+    if (!activePendingUserInput || activePendingIsResponding) return;
+    void onRespondToUserInput(activePendingUserInput.requestId, {});
+  }, [activePendingUserInput, activePendingIsResponding, onRespondToUserInput]);
+
+  const onChangeUserInputInlineAnswer = useCallback(
+    (questionId: string, value: string) => {
+      if (!activePendingUserInput) return;
+      setPendingUserInputAnswersByRequestId((existing) => ({
+        ...existing,
+        [activePendingUserInput.requestId]: {
+          ...existing[activePendingUserInput.requestId],
+          [questionId]: setPendingUserInputCustomAnswer(
+            existing[activePendingUserInput.requestId]?.[questionId],
+            value,
+          ),
+        },
+      }));
+    },
+    [activePendingUserInput],
+  );
 
   const onSubmitPlanFollowUp = useCallback(
     async ({
@@ -3438,19 +3467,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
       const next = replaceTextRange(promptRef.current, rangeStart, rangeEnd, replacement);
       promptRef.current = next.text;
-      const activePendingQuestion = activePendingProgress?.activeQuestion;
-      if (activePendingQuestion && activePendingUserInput) {
-        setPendingUserInputAnswersByRequestId((existing) => ({
-          ...existing,
-          [activePendingUserInput.requestId]: {
-            ...existing[activePendingUserInput.requestId],
-            [activePendingQuestion.id]: setPendingUserInputCustomAnswer(
-              existing[activePendingUserInput.requestId]?.[activePendingQuestion.id],
-              next.text,
-            ),
-          },
-        }));
-      } else {
+      if (!activePendingUserInput) {
         setPrompt(next.text);
       }
       setComposerCursor(next.cursor);
@@ -3580,13 +3597,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   const onPromptChange = useCallback(
     (nextPrompt: string, nextCursor: number, cursorAdjacentToMention: boolean) => {
-      if (activePendingProgress?.activeQuestion && activePendingUserInput) {
-        onChangeActivePendingUserInputCustomAnswer(
-          activePendingProgress.activeQuestion.id,
-          nextPrompt,
-          nextCursor,
-          cursorAdjacentToMention,
-        );
+      // When pending user input exists, custom answers are handled by inline
+      // inputs in the timeline card — ignore composer changes.
+      if (activePendingUserInput) {
         return;
       }
       promptRef.current = nextPrompt;
@@ -3601,12 +3614,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             ),
       );
     },
-    [
-      activePendingProgress?.activeQuestion,
-      activePendingUserInput,
-      onChangeActivePendingUserInputCustomAnswer,
-      setPrompt,
-    ],
+    [activePendingUserInput, setPrompt],
   );
 
   const onComposerCommandKey = (
@@ -3795,6 +3803,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
           markdownCwd={gitCwd ?? undefined}
           resolvedTheme={resolvedTheme}
           workspaceRoot={activeProject?.cwd ?? undefined}
+          pendingUserInput={activePendingUserInput}
+          pendingUserInputAnswers={activePendingDraftAnswers}
+          pendingUserInputIsResponding={activePendingIsResponding}
+          pendingUserInputAllReady={activePendingResolvedAnswers !== null}
+          onSelectUserInputOption={onSelectActivePendingUserInputOption}
+          onChangeUserInputCustomAnswer={onChangeUserInputInlineAnswer}
+          onSubmitUserInputAnswers={onSubmitPendingUserInputAnswers}
+          onDismissUserInput={onDismissPendingUserInput}
         />
       </div>
 
@@ -3822,16 +3838,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   pendingCount={pendingApprovals.length}
                 />
               </div>
-            ) : pendingUserInputs.length > 0 ? (
-              <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
-                <ComposerPendingUserInputPanel
-                  pendingUserInputs={pendingUserInputs}
-                  respondingRequestIds={respondingUserInputRequestIds}
-                  answers={activePendingDraftAnswers}
-                  questionIndex={activePendingQuestionIndex}
-                  onSelectOption={onSelectActivePendingUserInputOption}
-                />
-              </div>
             ) : showPlanFollowUpPrompt && activeProposedPlan ? (
               <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
                 <ComposerPlanFollowUpBanner
@@ -3841,11 +3847,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
               </div>
             ) : null}
 
-            {/* Textarea area */}
+            {/* Textarea area — hidden when user input questions are pending (answers via timeline card) */}
             <div
               className={cn(
                 "relative px-3 pb-2 sm:px-4",
                 hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4",
+                pendingUserInputs.length > 0 && "hidden",
               )}
             >
               {composerMenuOpen && !isComposerApprovalState && (
@@ -3942,15 +3949,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 placeholder={
                   isComposerApprovalState
                     ? (activePendingApproval?.detail ?? "Resolve this approval request to continue")
-                    : activePendingProgress
-                    ? "Type your own answer, or leave this blank to use the selected option"
+                    : activePendingUserInput
+                    ? "Respond to the questions above to continue"
                     : showPlanFollowUpPrompt && activeProposedPlan
                       ? "Add feedback to refine the plan, or leave this blank to implement it"
                       : phase === "disconnected"
                         ? "Ask for follow-up changes or attach images"
                         : "Ask anything, @tag files/folders, or use /model"
                 }
-                disabled={isConnecting || isComposerApprovalState}
+                disabled={isConnecting || isComposerApprovalState || pendingUserInputs.length > 0}
               />
             </div>
 
@@ -4083,6 +4090,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       )}
                     </>
                   )}
+
+                  {/* MCP servers */}
+                  {activeThreadId && (
+                    <>
+                      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+                      <McpPanel threadId={activeThreadId} />
+                    </>
+                  )}
                 </div>
 
                 {/* Right side: send / stop button */}
@@ -4090,38 +4105,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   {isPreparingWorktree ? (
                     <span className="text-muted-foreground/70 text-xs">Preparing worktree...</span>
                   ) : null}
-                  {activePendingProgress ? (
-                    <div className="flex items-center gap-2">
-                      {activePendingProgress.questionIndex > 0 ? (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="rounded-full"
-                          onClick={onPreviousActivePendingUserInputQuestion}
-                          disabled={activePendingIsResponding}
-                        >
-                          Previous
-                        </Button>
-                      ) : null}
-                      <Button
-                        type="submit"
-                        size="sm"
-                        className="rounded-full px-4"
-                        disabled={
-                          activePendingIsResponding ||
-                          (activePendingProgress.isLastQuestion
-                            ? !activePendingResolvedAnswers
-                            : !activePendingProgress.canAdvance)
-                        }
-                      >
-                        {activePendingIsResponding
-                          ? "Submitting..."
-                          : activePendingProgress.isLastQuestion
-                            ? "Submit answers"
-                            : "Next question"}
-                      </Button>
-                    </div>
-                  ) : phase === "running" ? (
+                  {phase === "running" ? (
                     <button
                       type="button"
                       className="flex size-8 items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
@@ -4695,86 +4679,6 @@ const PlanModePanel = memo(function PlanModePanel({ activePlan }: PlanModePanelP
   );
 });
 
-interface PendingUserInputPanelProps {
-  pendingUserInputs: PendingUserInput[];
-  respondingRequestIds: ApprovalRequestId[];
-  answers: Record<string, PendingUserInputDraftAnswer>;
-  questionIndex: number;
-  onSelectOption: (questionId: string, optionLabel: string) => void;
-}
-
-const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPanel({
-  pendingUserInputs,
-  respondingRequestIds,
-  answers,
-  questionIndex,
-  onSelectOption,
-}: PendingUserInputPanelProps) {
-  if (pendingUserInputs.length === 0) return null;
-  const activePrompt = pendingUserInputs[0];
-  if (!activePrompt) return null;
-
-  return (
-    <ComposerPendingUserInputCard
-      key={activePrompt.requestId}
-      prompt={activePrompt}
-      isResponding={respondingRequestIds.includes(activePrompt.requestId)}
-      answers={answers}
-      questionIndex={questionIndex}
-      onSelectOption={onSelectOption}
-    />
-  );
-});
-
-const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard({
-  prompt,
-  isResponding,
-  answers,
-  questionIndex,
-  onSelectOption,
-}: {
-  prompt: PendingUserInput;
-  isResponding: boolean;
-  answers: Record<string, PendingUserInputDraftAnswer>;
-  questionIndex: number;
-  onSelectOption: (questionId: string, optionLabel: string) => void;
-}) {
-  const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
-  const activeQuestion = progress.activeQuestion;
-
-  if (!activeQuestion) {
-    return null;
-  }
-
-  return (
-    <div className="px-4 py-4 sm:px-5">
-      <div className="flex gap-2">
-        <span className="uppercase text-sm tracking-[0.2em]">
-          {questionIndex + 1}/{prompt.questions.length} {activeQuestion.header}
-        </span>
-        <div className="text-sm font-medium">{activeQuestion.question}</div>
-      </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        {activeQuestion.options.map((option) => {
-          const isSelected = progress.selectedOptionLabel === option.label;
-          return (
-            <Button
-              key={`${activeQuestion.id}:${option.label}`}
-              size="sm"
-              variant={isSelected ? "default" : "outline"}
-              disabled={isResponding}
-              onClick={() => onSelectOption(activeQuestion.id, option.label)}
-              title={option.description}
-            >
-              {option.label}
-            </Button>
-          );
-        })}
-      </div>
-    </div>
-  );
-});
-
 const ComposerPlanFollowUpBanner = memo(function ComposerPlanFollowUpBanner({
   planTitle,
 }: {
@@ -5131,6 +5035,177 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
   );
 });
 
+const UserInputQuestionCard = memo(function UserInputQuestionCard({
+  pendingInput,
+  answers,
+  isResponding,
+  allAnswersReady,
+  onSelectOption,
+  onChangeCustomAnswer,
+  onSubmit,
+  onDismiss,
+}: {
+  pendingInput: PendingUserInput;
+  answers: Record<string, PendingUserInputDraftAnswer>;
+  isResponding: boolean;
+  allAnswersReady: boolean;
+  onSelectOption: (questionId: string, optionLabel: string) => void;
+  onChangeCustomAnswer: (questionId: string, value: string) => void;
+  onSubmit: () => void;
+  onDismiss: () => void;
+}) {
+  const { questions } = pendingInput;
+  const answeredCount = countAnsweredPendingUserInputQuestions(questions, answers);
+  const totalCount = questions.length;
+
+  return (
+    <div className="rounded-xl border border-primary/20 bg-card shadow-sm shadow-primary/5">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-border/40 px-4 py-2.5">
+        <div className="flex items-center gap-2">
+          <div className="flex size-5 items-center justify-center rounded-full bg-primary/15">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="text-primary">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+          </div>
+          <span className="text-xs font-medium text-foreground/80">Input needed</span>
+        </div>
+        {totalCount > 1 && (
+          <span className="text-[11px] tabular-nums text-muted-foreground/60">
+            {answeredCount}/{totalCount} answered
+          </span>
+        )}
+      </div>
+
+      {/* Questions */}
+      <div className={cn("space-y-3 px-4 py-3", totalCount > 3 && "max-h-[45vh] overflow-y-auto")}>
+        {questions.map((question) => {
+          const draft = answers[question.id];
+          const resolvedAnswer = resolvePendingUserInputAnswer(draft);
+          const isAnswered = Boolean(resolvedAnswer);
+          const selectedOption = draft?.selectedOptionLabel;
+          const customValue = draft?.customAnswer ?? "";
+          const hasOptions = question.options.length > 0;
+
+          return (
+            <div key={question.id} className="space-y-1.5">
+              {/* Question text */}
+              <div className="flex items-start gap-2">
+                <div
+                  className={cn(
+                    "mt-[5px] size-1.5 shrink-0 rounded-full transition-colors duration-200",
+                    isAnswered
+                      ? "bg-primary shadow-[0_0_4px_1px] shadow-primary/30"
+                      : "bg-muted-foreground/25",
+                  )}
+                />
+                <div className="min-w-0 flex-1">
+                  {question.header && (
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/50">
+                      {question.header}
+                    </p>
+                  )}
+                  <p className="text-[13px] font-medium leading-snug text-foreground/90">
+                    {question.question}
+                  </p>
+                </div>
+              </div>
+
+              {/* Options */}
+              {hasOptions && (
+                <div className="flex flex-wrap gap-1.5 pl-3.5">
+                  {question.options.map((option) => {
+                    const isSelected = selectedOption === option.label && !customValue.trim();
+                    return (
+                      <button
+                        key={`${question.id}:${option.label}`}
+                        type="button"
+                        disabled={isResponding}
+                        onClick={() => onSelectOption(question.id, option.label)}
+                        title={option.description}
+                        className={cn(
+                          "rounded-md border px-2.5 py-1 text-xs font-medium transition-all duration-150",
+                          "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                          isSelected
+                            ? "border-primary/70 bg-primary text-primary-foreground shadow-sm shadow-primary/20"
+                            : "border-border/40 text-foreground/70 hover:border-border/70 hover:bg-muted/30",
+                          isResponding && "pointer-events-none opacity-50",
+                        )}
+                      >
+                        {option.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* Inline text input for custom answer */}
+              <div className="pl-3.5">
+                <textarea
+                  rows={1}
+                  value={customValue}
+                  onChange={(e) => onChangeCustomAnswer(question.id, e.target.value)}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === "Escape") {
+                      e.currentTarget.blur();
+                    }
+                  }}
+                  onFocus={(e) => e.stopPropagation()}
+                  onInput={(e) => {
+                    const target = e.currentTarget;
+                    target.style.height = "auto";
+                    target.style.height = `${Math.min(target.scrollHeight, 120)}px`;
+                  }}
+                  disabled={isResponding}
+                  aria-label={`Custom answer for: ${question.question}`}
+                  placeholder={hasOptions ? "Or type a custom answer..." : "Type your answer..."}
+                  className={cn(
+                    "w-full resize-none rounded-md border bg-transparent px-2.5 py-1.5 text-xs text-foreground/80",
+                    "placeholder:text-muted-foreground/35 focus:outline-none focus:ring-1 focus:ring-ring/50",
+                    "transition-colors duration-150",
+                    hasOptions
+                      ? "border-border/25 hover:border-border/50"
+                      : "border-border/40 hover:border-border/60",
+                    isResponding && "pointer-events-none opacity-50",
+                  )}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Submit footer */}
+      <div className="flex items-center justify-between border-t border-border/40 px-4 py-2.5">
+        <Button
+          size="sm"
+          variant="ghost"
+          className="rounded-full px-4 text-xs text-muted-foreground hover:text-foreground"
+          disabled={isResponding}
+          onClick={onDismiss}
+        >
+          Skip
+        </Button>
+        <Button
+          size="sm"
+          className="rounded-full px-5 text-xs"
+          disabled={isResponding || !allAnswersReady}
+          onClick={onSubmit}
+        >
+          {isResponding
+            ? "Submitting..."
+            : allAnswersReady
+              ? "Submit answers"
+              : `${answeredCount}/${totalCount} answered`}
+        </Button>
+      </div>
+    </div>
+  );
+});
+
 interface MessagesTimelineProps {
   hasMessages: boolean;
   isWorking: boolean;
@@ -5152,6 +5227,14 @@ interface MessagesTimelineProps {
   markdownCwd: string | undefined;
   resolvedTheme: "light" | "dark";
   workspaceRoot: string | undefined;
+  pendingUserInput: PendingUserInput | null;
+  pendingUserInputAnswers: Record<string, PendingUserInputDraftAnswer>;
+  pendingUserInputIsResponding: boolean;
+  pendingUserInputAllReady: boolean;
+  onSelectUserInputOption: (questionId: string, optionLabel: string) => void;
+  onChangeUserInputCustomAnswer: (questionId: string, value: string) => void;
+  onSubmitUserInputAnswers: () => void;
+  onDismissUserInput: () => void;
 }
 
 type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
@@ -5185,6 +5268,11 @@ type TimelineRow =
       createdAt: string;
       subagent: TimelineSubagent;
     }
+  | {
+      kind: "user-input";
+      id: string;
+      createdAt: string;
+    }
   | { kind: "working"; id: string; createdAt: string | null };
 
 function estimateTimelineProposedPlanHeight(proposedPlan: TimelineProposedPlan): number {
@@ -5213,6 +5301,14 @@ const MessagesTimeline = memo(function MessagesTimeline({
   markdownCwd,
   resolvedTheme,
   workspaceRoot,
+  pendingUserInput,
+  pendingUserInputAnswers,
+  pendingUserInputIsResponding,
+  pendingUserInputAllReady,
+  onSelectUserInputOption,
+  onChangeUserInputCustomAnswer,
+  onSubmitUserInputAnswers,
+  onDismissUserInput,
 }: MessagesTimelineProps) {
   const timelineRootRef = useRef<HTMLDivElement | null>(null);
   const [timelineWidthPx, setTimelineWidthPx] = useState<number | null>(null);
@@ -5301,6 +5397,14 @@ const MessagesTimeline = memo(function MessagesTimeline({
       });
     }
 
+    if (pendingUserInput) {
+      nextRows.push({
+        kind: "user-input",
+        id: `user-input:${pendingUserInput.requestId}`,
+        createdAt: pendingUserInput.createdAt,
+      });
+    }
+
     if (isWorking) {
       nextRows.push({
         kind: "working",
@@ -5310,7 +5414,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
     }
 
     return nextRows;
-  }, [timelineEntries, completionDividerBeforeEntryId, isWorking, activeTurnStartedAt]);
+  }, [timelineEntries, completionDividerBeforeEntryId, isWorking, activeTurnStartedAt, pendingUserInput]);
 
   const firstUnvirtualizedRowIndex = useMemo(() => {
     const firstTailRowIndex = Math.max(rows.length - ALWAYS_UNVIRTUALIZED_TAIL_ROWS, 0);
@@ -5365,6 +5469,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
       if (!row) return 96;
       if (row.kind === "work") return 112;
       if (row.kind === "subagent") return 120;
+      if (row.kind === "user-input") return 250;
       if (row.kind === "proposed-plan") return estimateTimelineProposedPlanHeight(row.proposedPlan);
       if (row.kind === "working") return 40;
       return estimateTimelineMessageHeight(row.message, { timelineWidthPx });
@@ -5664,6 +5769,19 @@ const MessagesTimeline = memo(function MessagesTimeline({
       )}
 
       {row.kind === "subagent" && <SubagentCard subagent={row.subagent} nowIso={nowIso} />}
+
+      {row.kind === "user-input" && pendingUserInput && (
+        <UserInputQuestionCard
+          pendingInput={pendingUserInput}
+          answers={pendingUserInputAnswers}
+          isResponding={pendingUserInputIsResponding}
+          allAnswersReady={pendingUserInputAllReady}
+          onSelectOption={onSelectUserInputOption}
+          onChangeCustomAnswer={onChangeUserInputCustomAnswer}
+          onSubmit={onSubmitUserInputAnswers}
+          onDismiss={onDismissUserInput}
+        />
+      )}
 
       {row.kind === "working" && (
         <div className="flex items-center gap-2 py-0.5 pl-1.5">

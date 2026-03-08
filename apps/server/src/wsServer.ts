@@ -17,6 +17,7 @@ import {
   type OrchestrationCommand,
   ORCHESTRATION_WS_CHANNELS,
   ORCHESTRATION_WS_METHODS,
+  MCP_WS_METHODS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
   ProjectId,
   ThreadId,
@@ -910,6 +911,46 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         const body = stripRequestTag(request.body);
         const keybindingsConfig = yield* keybindingsManager.upsertKeybindingRule(body);
         return { keybindings: keybindingsConfig, issues: [] };
+      }
+
+      case MCP_WS_METHODS.mcpGetStatus: {
+        const { threadId } = request.body;
+        const servers = liveProviderService.mcpGetStatus
+          ? yield* liveProviderService.mcpGetStatus(threadId)
+          : [];
+        return { servers };
+      }
+
+      case MCP_WS_METHODS.mcpSetServers: {
+        const { threadId, servers } = request.body;
+        if (!liveProviderService.mcpSetServers) {
+          return yield* new RouteRequestError({
+            message: "MCP server management is not supported by the current provider.",
+          });
+        }
+        return yield* liveProviderService.mcpSetServers(threadId, servers);
+      }
+
+      case MCP_WS_METHODS.mcpReconnectServer: {
+        const { threadId, serverName } = request.body;
+        if (!liveProviderService.mcpReconnectServer) {
+          return yield* new RouteRequestError({
+            message: "MCP server management is not supported by the current provider.",
+          });
+        }
+        yield* liveProviderService.mcpReconnectServer(threadId, serverName);
+        return {};
+      }
+
+      case MCP_WS_METHODS.mcpToggleServer: {
+        const { threadId, serverName, enabled } = request.body;
+        if (!liveProviderService.mcpToggleServer) {
+          return yield* new RouteRequestError({
+            message: "MCP server management is not supported by the current provider.",
+          });
+        }
+        yield* liveProviderService.mcpToggleServer(threadId, serverName, enabled);
+        return {};
       }
 
       default: {

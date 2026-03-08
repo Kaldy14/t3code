@@ -12,6 +12,7 @@ import {
   type CursorModelSlug,
   type CursorReasoningOption,
   type ModelSlug,
+  type ProviderEffort,
   type ProviderKind,
 } from "@t3tools/contracts";
 
@@ -269,15 +270,15 @@ export function resolveModelSlugForProvider(
 
 export function getReasoningEffortOptions(
   provider: ProviderKind = "codex",
-): ReadonlyArray<CodexReasoningEffort> {
+): ReadonlyArray<ProviderEffort> {
   return REASONING_EFFORT_OPTIONS_BY_PROVIDER[provider];
 }
 
 export function getDefaultReasoningEffort(provider: "codex"): CodexReasoningEffort;
-export function getDefaultReasoningEffort(provider: ProviderKind): CodexReasoningEffort | null;
+export function getDefaultReasoningEffort(provider: ProviderKind): ProviderEffort | null;
 export function getDefaultReasoningEffort(
   provider: ProviderKind = "codex",
-): CodexReasoningEffort | null {
+): ProviderEffort | null {
   return DEFAULT_REASONING_EFFORT_BY_PROVIDER[provider];
 }
 

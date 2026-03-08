@@ -21,6 +21,7 @@ const RuntimeEventRawSource = Schema.Literals([
   "codex.eventmsg",
   "claude.sdk.message",
   "claude.sdk.permission",
+  "claude.sdk.elicitation",
   "codex.sdk.thread-event",
   "cursor.acp.notification",
   "cursor.acp.request",
@@ -506,7 +507,12 @@ const AccountRateLimitsUpdatedPayload = Schema.Struct({
 export type AccountRateLimitsUpdatedPayload = typeof AccountRateLimitsUpdatedPayload.Type;
 
 const McpStatusUpdatedPayload = Schema.Struct({
-  status: Schema.Unknown,
+  servers: Schema.Array(Schema.Struct({
+    name: TrimmedNonEmptyStringSchema,
+    status: Schema.String,
+    error: Schema.optional(Schema.String),
+    scope: Schema.optional(Schema.String),
+  })),
 });
 export type McpStatusUpdatedPayload = typeof McpStatusUpdatedPayload.Type;
 

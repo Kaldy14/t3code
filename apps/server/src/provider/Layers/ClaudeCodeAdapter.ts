@@ -6,8 +6,12 @@
  *
  * @module ClaudeCodeAdapterLive
  */
+import * as childProcess from "node:child_process";
 import {
   type CanUseTool,
+  type ElicitationRequest,
+  type ElicitationResult,
+  type OnElicitation,
   query,
   type Options as ClaudeQueryOptions,
   type PermissionMode,
@@ -22,6 +26,8 @@ import {
   type CanonicalItemType,
   type CanonicalRequestType,
   EventId,
+  type McpServerStatus,
+  type McpSetServersResult,
   type ProviderApprovalDecision,
   ProviderItemId,
   type ProviderRuntimeEvent,
@@ -82,6 +88,21 @@ interface PendingApproval {
   readonly decision: Deferred.Deferred<ProviderApprovalDecision>;
 }
 
+interface PendingElicitation {
+  readonly requestId: ApprovalRequestId;
+  readonly serverName: string;
+  readonly message: string;
+  readonly mode: "form" | "url" | undefined;
+  readonly requestedSchema: Record<string, unknown> | undefined;
+  readonly decision: Deferred.Deferred<ElicitationResult>;
+}
+
+interface PendingUserQuestion {
+  readonly requestId: ApprovalRequestId;
+  readonly toolInput: Record<string, unknown>;
+  readonly decision: Deferred.Deferred<Record<string, string>>;
+}
+
 interface ToolInFlight {
   readonly itemId: string;
   readonly itemType: CanonicalItemType;
@@ -97,8 +118,12 @@ interface ClaudeSessionContext {
   readonly promptQueue: Queue.Queue<PromptQueueItem>;
   readonly query: ClaudeQueryRuntime;
   readonly startedAt: string;
+  /** The permission mode the session was started with, used to restore after plan mode. */
+  readonly basePermissionMode: PermissionMode;
   resumeSessionId: string | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
+  readonly pendingElicitations: Map<ApprovalRequestId, PendingElicitation>;
+  readonly pendingUserQuestions: Map<ApprovalRequestId, PendingUserQuestion>;
   readonly turns: Array<{
     id: TurnId;
     items: Array<unknown>;
@@ -117,6 +142,11 @@ interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
   readonly setPermissionMode: (mode: PermissionMode) => Promise<void>;
   readonly setMaxThinkingTokens: (maxThinkingTokens: number | null) => Promise<void>;
   readonly close: () => void;
+  // MCP operations
+  readonly mcpServerStatus: () => Promise<unknown[]>;
+  readonly setMcpServers: (servers: Record<string, unknown>) => Promise<unknown>;
+  readonly reconnectMcpServer: (serverName: string) => Promise<void>;
+  readonly toggleMcpServer: (serverName: string, enabled: boolean) => Promise<void>;
 }
 
 export interface ClaudeCodeAdapterLiveOptions {
@@ -451,6 +481,75 @@ function sdkNativeItemId(message: SDKMessage): string | undefined {
   }
 
   return undefined;
+}
+
+/**
+ * Env vars that must not leak to spawned Claude Code processes.
+ * `ELECTRON_RUN_AS_NODE` causes Electron-based CLI binaries (e.g. claude
+ * installed via cmux) to run as plain Node instead of their normal entry,
+ * which makes them crash immediately with exit code 1.
+ */
+const STRIPPED_ENV_KEYS = [
+  "ELECTRON_RUN_AS_NODE",
+  "ELECTRON_NO_ATTACH_CONSOLE",
+  // cmux wrapper injects --session-id and --settings flags when this is set,
+  // which conflicts with the SDK's own arguments.
+  "CMUX_SURFACE_ID",
+  "CMUX_CLAUDE_HOOKS_DISABLED",
+];
+
+function sanitizedProcessEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const key of STRIPPED_ENV_KEYS) {
+    delete env[key];
+  }
+  return env;
+}
+
+/**
+ * Resolve the absolute path to the `claude` CLI binary.
+ *
+ * In desktop (Electron) builds the SDK's bundled `cli.js` lives inside the
+ * asar archive and cannot be spawned by a regular `node` child process.
+ * By resolving the system-installed `claude` binary and passing it as
+ * `pathToClaudeCodeExecutable`, the SDK spawns it directly as a native
+ * executable — bypassing the asar limitation entirely.
+ */
+let cachedClaudeBinaryPath: string | undefined | null = null;
+
+function resolveClaudeBinaryPath(): string | undefined {
+  if (cachedClaudeBinaryPath !== null) return cachedClaudeBinaryPath;
+  try {
+    // `which -a` lists all matches in PATH order. We skip shell-script
+    // wrappers (e.g. cmux) that inject flags incompatible with the SDK.
+    const result = childProcess.execFileSync("which", ["-a", "claude"], {
+      encoding: "utf8",
+      timeout: 3_000,
+    });
+    const candidates = result
+      .trim()
+      .split("\n")
+      .filter((p) => p.length > 0);
+    for (const candidate of candidates) {
+      try {
+        const head = childProcess.execFileSync("head", ["-c", "64", candidate], {
+          encoding: "utf8",
+          timeout: 1_000,
+        });
+        // Skip shell script wrappers — they inject flags that conflict with the SDK.
+        if (head.startsWith("#!")) continue;
+        cachedClaudeBinaryPath = candidate;
+        return cachedClaudeBinaryPath;
+      } catch {
+        continue;
+      }
+    }
+    // Fallback to first candidate if all are scripts (better than nothing).
+    cachedClaudeBinaryPath = candidates[0];
+  } catch {
+    cachedClaudeBinaryPath = undefined;
+  }
+  return cachedClaudeBinaryPath;
 }
 
 function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
@@ -1164,6 +1263,10 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
               },
             });
             return;
+          case "elicitation_complete":
+            // Informational — SDK confirms elicitation was processed.
+            // The Deferred was already resolved in respondToUserInput.
+            return;
           default:
             yield* emitRuntimeWarning(
               context,
@@ -1341,6 +1444,16 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         }
         context.pendingApprovals.clear();
 
+        for (const [, pending] of context.pendingElicitations) {
+          yield* Deferred.succeed(pending.decision, { action: "decline" });
+        }
+        context.pendingElicitations.clear();
+
+        for (const [, pending] of context.pendingUserQuestions) {
+          yield* Deferred.succeed(pending.decision, {});
+        }
+        context.pendingUserQuestions.clear();
+
         if (context.turnState) {
           yield* completeTurn(context, "interrupted", "Session stopped.");
         }
@@ -1425,6 +1538,9 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
       return Effect.succeed(context);
     };
 
+    // Mapping functions are defined at module level for testability.
+    // See: mapElicitationToUserInputQuestions, mapAnswersToElicitationContent
+
     const startSession: ClaudeCodeAdapterShape["startSession"] = (input) =>
       Effect.gen(function* () {
         if (input.provider !== undefined && input.provider !== PROVIDER) {
@@ -1461,6 +1577,58 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                 return {
                   behavior: "deny",
                   message: "Claude session context is unavailable.",
+                } satisfies PermissionResult;
+              }
+
+              // AskUserQuestion: surface to UI and wait for user answers
+              if (toolName === "AskUserQuestion") {
+                const requestId = ApprovalRequestId.makeUnsafe(yield* Random.nextUUIDv4);
+                const decisionDeferred = yield* Deferred.make<Record<string, string>>();
+                const questions = mapAskUserQuestionToUserInputQuestions(toolInput);
+
+                const pending: PendingUserQuestion = {
+                  requestId,
+                  toolInput,
+                  decision: decisionDeferred,
+                };
+
+                const stamp = yield* makeEventStamp();
+                yield* offerRuntimeEvent({
+                  type: "user-input.requested",
+                  eventId: stamp.eventId,
+                  provider: PROVIDER,
+                  createdAt: stamp.createdAt,
+                  threadId: context.internalThreadId,
+                  ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+                  requestId: asRuntimeRequestId(requestId),
+                  payload: { questions },
+                  providerRefs: {
+                    ...providerThreadRef(context),
+                    ...(context.turnState ? { providerTurnId: String(context.turnState.turnId) } : {}),
+                    providerRequestId: requestId,
+                  },
+                  raw: {
+                    source: "claude.sdk.permission",
+                    method: "canUseTool/AskUserQuestion",
+                    payload: { toolName, input: toolInput },
+                  },
+                });
+
+                context.pendingUserQuestions.set(requestId, pending);
+
+                const onAbort = () => {
+                  if (!context.pendingUserQuestions.has(requestId)) return;
+                  context.pendingUserQuestions.delete(requestId);
+                  Effect.runFork(Deferred.succeed(decisionDeferred, {}));
+                };
+                callbackOptions.signal.addEventListener("abort", onAbort, { once: true });
+
+                const answers = yield* Deferred.await(decisionDeferred);
+                context.pendingUserQuestions.delete(requestId);
+
+                return {
+                  behavior: "allow",
+                  updatedInput: { ...toolInput, answers },
                 } satisfies PermissionResult;
               }
 
@@ -1586,16 +1754,84 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
             }),
           );
 
+        const handleElicitation: OnElicitation = (request, callbackOptions) =>
+          Effect.runPromise(
+            Effect.gen(function* () {
+              const context = yield* Ref.get(contextRef);
+              if (!context || context.stopped) {
+                return { action: "decline" } satisfies ElicitationResult;
+              }
+
+              const requestId = ApprovalRequestId.makeUnsafe(yield* Random.nextUUIDv4);
+              const decisionDeferred = yield* Deferred.make<ElicitationResult>();
+
+              const questions = mapElicitationToUserInputQuestions(request);
+
+              const pending: PendingElicitation = {
+                requestId,
+                serverName: request.serverName,
+                message: request.message,
+                mode: request.mode,
+                requestedSchema: request.requestedSchema,
+                decision: decisionDeferred,
+              };
+
+              const stamp = yield* makeEventStamp();
+              yield* offerRuntimeEvent({
+                type: "user-input.requested",
+                eventId: stamp.eventId,
+                provider: PROVIDER,
+                createdAt: stamp.createdAt,
+                threadId: context.internalThreadId,
+                ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+                requestId: asRuntimeRequestId(requestId),
+                payload: {
+                  questions,
+                },
+                providerRefs: {
+                  ...providerThreadRef(context),
+                  ...(context.turnState ? { providerTurnId: String(context.turnState.turnId) } : {}),
+                  providerRequestId: requestId,
+                },
+                raw: {
+                  source: "claude.sdk.elicitation",
+                  method: "onElicitation/request",
+                  payload: {
+                    serverName: request.serverName,
+                    message: request.message,
+                    mode: request.mode,
+                    elicitationId: request.elicitationId,
+                  },
+                },
+              });
+
+              context.pendingElicitations.set(requestId, pending);
+
+              const onAbort = () => {
+                if (!context.pendingElicitations.has(requestId)) return;
+                context.pendingElicitations.delete(requestId);
+                Effect.runFork(Deferred.succeed(decisionDeferred, { action: "decline" }));
+              };
+              callbackOptions.signal.addEventListener("abort", onAbort, { once: true });
+
+              const result = yield* Deferred.await(decisionDeferred);
+              context.pendingElicitations.delete(requestId);
+              return result;
+            }),
+          );
+
         const providerOptions = input.providerOptions?.claudeCode;
         const permissionMode =
           toPermissionMode(providerOptions?.permissionMode) ??
           (input.runtimeMode === "full-access" ? "bypassPermissions" : undefined);
 
+        const claudeBinaryPath = providerOptions?.binaryPath ?? resolveClaudeBinaryPath();
+
         const queryOptions: ClaudeQueryOptions = {
           ...(input.cwd ? { cwd: input.cwd } : {}),
           ...(input.model ? { model: input.model } : {}),
-          ...(providerOptions?.binaryPath
-            ? { pathToClaudeCodeExecutable: providerOptions.binaryPath }
+          ...(claudeBinaryPath
+            ? { pathToClaudeCodeExecutable: claudeBinaryPath }
             : {}),
           ...(permissionMode ? { permissionMode } : {}),
           ...(permissionMode === "bypassPermissions"
@@ -1604,11 +1840,16 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           ...(providerOptions?.maxThinkingTokens !== undefined
             ? { maxThinkingTokens: providerOptions.maxThinkingTokens }
             : {}),
+          ...(input.modelOptions?.claudeCode?.effort
+            ? { effort: input.modelOptions.claudeCode.effort }
+            : {}),
           ...(resumeState?.resume ? { resume: resumeState.resume } : {}),
           ...(resumeState?.resumeSessionAt ? { resumeSessionAt: resumeState.resumeSessionAt } : {}),
           includePartialMessages: true,
           canUseTool,
-          env: process.env,
+          onElicitation: handleElicitation,
+          toolConfig: { askUserQuestion: { previewFormat: "html" } },
+          env: sanitizedProcessEnv(),
           ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
           // Load all filesystem settings so custom skills, plugins, CLAUDE.md,
           // and user preferences are available in SDK sessions.
@@ -1655,8 +1896,11 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           promptQueue,
           query: queryRuntime,
           startedAt,
+          basePermissionMode: permissionMode ?? "default",
           resumeSessionId: resumeState?.resume,
           pendingApprovals,
+          pendingElicitations: new Map<ApprovalRequestId, PendingElicitation>(),
+          pendingUserQuestions: new Map<ApprovalRequestId, PendingUserQuestion>(),
           turns: [],
           inFlightTools,
           turnState: undefined,
@@ -1735,6 +1979,15 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           yield* Effect.tryPromise({
             try: () => context.query.setModel(input.model),
             catch: (cause) => toRequestError(input.threadId, "turn/setModel", cause),
+          });
+        }
+
+        if (input.interactionMode) {
+          const targetMode: PermissionMode =
+            input.interactionMode === "plan" ? "plan" : context.basePermissionMode;
+          yield* Effect.tryPromise({
+            try: () => context.query.setPermissionMode(targetMode),
+            catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
           });
         }
 
@@ -1833,15 +2086,89 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
     const respondToUserInput: ClaudeCodeAdapterShape["respondToUserInput"] = (
       threadId,
       requestId,
-      _answers,
+      answers,
     ) =>
-      Effect.fail(
-        new ProviderAdapterRequestError({
+      Effect.gen(function* () {
+        const context = yield* requireSession(threadId);
+
+        // Check pending user questions (AskUserQuestion tool) first
+        const pendingQuestion = context.pendingUserQuestions.get(requestId);
+        if (pendingQuestion) {
+          context.pendingUserQuestions.delete(requestId);
+          yield* Deferred.succeed(
+            pendingQuestion.decision,
+            answers as Record<string, string>,
+          );
+
+          const stamp = yield* makeEventStamp();
+          yield* offerRuntimeEvent({
+            type: "user-input.resolved",
+            eventId: stamp.eventId,
+            provider: PROVIDER,
+            createdAt: stamp.createdAt,
+            threadId: context.internalThreadId,
+            ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+            requestId: asRuntimeRequestId(requestId),
+            payload: { answers },
+            providerRefs: {
+              ...providerThreadRef(context),
+              ...(context.turnState ? { providerTurnId: String(context.turnState.turnId) } : {}),
+              providerRequestId: requestId,
+            },
+            raw: {
+              source: "claude.sdk.permission",
+              method: "canUseTool/AskUserQuestion/response",
+              payload: { answers },
+            },
+          });
+          return;
+        }
+
+        // Check pending elicitations (MCP elicitation)
+        const pending = context.pendingElicitations.get(requestId);
+        if (!pending) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "item/tool/requestUserInput",
+            detail: `Unknown pending user input request: ${requestId}`,
+          });
+        }
+
+        const content = mapAnswersToElicitationContent(
+          answers as Record<string, unknown>,
+          pending.requestedSchema,
+        );
+
+        context.pendingElicitations.delete(requestId);
+        yield* Deferred.succeed(pending.decision, {
+          action: "accept",
+          content: content as { [x: string]: string | number | boolean | string[] },
+        });
+
+        const stamp = yield* makeEventStamp();
+        yield* offerRuntimeEvent({
+          type: "user-input.resolved",
+          eventId: stamp.eventId,
           provider: PROVIDER,
-          method: "item/tool/requestUserInput",
-          detail: `Claude Code does not yet support structured user-input responses for thread '${threadId}' and request '${requestId}'.`,
-        }),
-      );
+          createdAt: stamp.createdAt,
+          threadId: context.internalThreadId,
+          ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+          requestId: asRuntimeRequestId(requestId),
+          payload: {
+            answers: content,
+          },
+          providerRefs: {
+            ...providerThreadRef(context),
+            ...(context.turnState ? { providerTurnId: String(context.turnState.turnId) } : {}),
+            providerRequestId: requestId,
+          },
+          raw: {
+            source: "claude.sdk.elicitation",
+            method: "onElicitation/response",
+            payload: { answers: content },
+          },
+        });
+      });
 
     const stopSession: ClaudeCodeAdapterShape["stopSession"] = (threadId) =>
       Effect.gen(function* () {
@@ -1868,6 +2195,64 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
 
     const getCachedSlashCommands: ClaudeCodeAdapterShape["getCachedSlashCommands"] = () =>
       Effect.sync(() => cachedSlashCommands);
+
+    const mcpGetStatus: ClaudeCodeAdapterShape["mcpGetStatus"] = (threadId) =>
+      Effect.gen(function* () {
+        const context = yield* requireSession(threadId);
+        const statuses = yield* Effect.tryPromise({
+          try: () => context.query.mcpServerStatus(),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "mcp/getStatus",
+              detail: toMessage(cause, "Failed to get MCP server status"),
+            }),
+        });
+        return statuses as unknown as ReadonlyArray<McpServerStatus>;
+      });
+
+    const mcpSetServers: ClaudeCodeAdapterShape["mcpSetServers"] = (threadId, servers) =>
+      Effect.gen(function* () {
+        const context = yield* requireSession(threadId);
+        const result = yield* Effect.tryPromise({
+          try: () => context.query.setMcpServers(servers as any),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "mcp/setServers",
+              detail: toMessage(cause, "Failed to set MCP servers"),
+            }),
+        });
+        return result as unknown as McpSetServersResult;
+      });
+
+    const mcpReconnectServer: ClaudeCodeAdapterShape["mcpReconnectServer"] = (threadId, serverName) =>
+      Effect.gen(function* () {
+        const context = yield* requireSession(threadId);
+        yield* Effect.tryPromise({
+          try: () => context.query.reconnectMcpServer(serverName),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "mcp/reconnect",
+              detail: toMessage(cause, `Failed to reconnect MCP server '${serverName}'`),
+            }),
+        });
+      });
+
+    const mcpToggleServer: ClaudeCodeAdapterShape["mcpToggleServer"] = (threadId, serverName, enabled) =>
+      Effect.gen(function* () {
+        const context = yield* requireSession(threadId);
+        yield* Effect.tryPromise({
+          try: () => context.query.toggleMcpServer(serverName, enabled),
+          catch: (cause) =>
+            new ProviderAdapterRequestError({
+              provider: PROVIDER,
+              method: "mcp/toggle",
+              detail: toMessage(cause, `Failed to toggle MCP server '${serverName}'`),
+            }),
+        });
+      });
 
     const stopAll: ClaudeCodeAdapterShape["stopAll"] = () =>
       Effect.forEach(
@@ -1907,10 +2292,120 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
       hasSession,
       getSlashCommands,
       getCachedSlashCommands,
+      mcpGetStatus,
+      mcpSetServers,
+      mcpReconnectServer,
+      mcpToggleServer,
       stopAll,
       streamEvents: Stream.fromQueue(runtimeEventQueue),
     } satisfies ClaudeCodeAdapterShape;
   });
+}
+
+export function mapAskUserQuestionToUserInputQuestions(
+  toolInput: Record<string, unknown>,
+): Array<{ id: string; header: string; question: string; options: Array<{ label: string; description: string }> }> {
+  const questions = Array.isArray(toolInput.questions) ? toolInput.questions : [];
+  if (questions.length === 0) {
+    return [{ id: "question", header: "Question", question: "Please respond", options: [] }];
+  }
+
+  return questions.map((q: Record<string, unknown>, index: number) => {
+    const question = typeof q.question === "string" ? q.question : `Question ${index + 1}`;
+    const header = typeof q.header === "string" ? q.header : "Question";
+    const rawOptions = Array.isArray(q.options) ? q.options : [];
+    const options = rawOptions
+      .filter((opt: unknown): opt is Record<string, unknown> => typeof opt === "object" && opt !== null)
+      .map((opt: Record<string, unknown>) => ({
+        label: typeof opt.label === "string" ? opt.label : "",
+        description: typeof opt.description === "string" ? opt.description : "",
+      }))
+      .filter((opt) => opt.label.length > 0);
+
+    // Use question text as id — matches the SDK's expected answer key format
+    return { id: question, header, question, options };
+  });
+}
+
+export function mapElicitationToUserInputQuestions(
+  request: { serverName: string; message: string; requestedSchema?: Record<string, unknown> },
+): Array<{ id: string; header: string; question: string; options: Array<{ label: string; description: string }> }> {
+  const header = `MCP: ${request.serverName}`;
+  const schema = request.requestedSchema;
+
+  if (!schema || typeof schema !== "object") {
+    return [{ id: "elicitation", header, question: request.message, options: [] }];
+  }
+
+  const properties = (schema as Record<string, unknown>).properties;
+  if (!properties || typeof properties !== "object") {
+    return [{ id: "elicitation", header, question: request.message, options: [] }];
+  }
+
+  const entries = Object.entries(properties as Record<string, Record<string, unknown>>);
+  if (entries.length === 0) {
+    return [{ id: "elicitation", header, question: request.message, options: [] }];
+  }
+
+  const hasComplexFeatures = entries.some(([, prop]) => {
+    const propType = prop.type;
+    return (
+      prop.oneOf !== undefined ||
+      prop.allOf !== undefined ||
+      prop.anyOf !== undefined ||
+      prop.$ref !== undefined ||
+      propType === "object" ||
+      propType === "array"
+    );
+  });
+
+  if (hasComplexFeatures) {
+    return [{ id: "elicitation", header, question: request.message, options: [] }];
+  }
+
+  return entries.map(([key, prop]) => {
+    const question = (prop.description as string) ?? (prop.title as string) ?? key;
+    const enumValues = Array.isArray(prop.enum) ? prop.enum : [];
+    const options = enumValues
+      .filter((v): v is string => typeof v === "string")
+      .map((v) => ({ label: v, description: v }));
+    return { id: key, header, question, options };
+  });
+}
+
+export function mapAnswersToElicitationContent(
+  answers: Record<string, unknown>,
+  requestedSchema: Record<string, unknown> | undefined,
+): Record<string, unknown> {
+  if (!requestedSchema) return { ...answers };
+
+  const properties = (requestedSchema as Record<string, unknown>).properties as
+    | Record<string, Record<string, unknown>>
+    | undefined;
+  if (!properties) return { ...answers };
+
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(answers)) {
+    const prop = properties[key];
+    if (!prop || typeof value !== "string") {
+      result[key] = value;
+      continue;
+    }
+
+    if (prop.type === "boolean") {
+      result[key] = value === "true";
+      continue;
+    }
+
+    if (prop.type === "number" || prop.type === "integer") {
+      const num = Number(value);
+      result[key] = Number.isNaN(num) ? value : num;
+      continue;
+    }
+
+    result[key] = value;
+  }
+  return result;
 }
 
 export const ClaudeCodeAdapterLive = Layer.effect(ClaudeCodeAdapter, makeClaudeCodeAdapter());

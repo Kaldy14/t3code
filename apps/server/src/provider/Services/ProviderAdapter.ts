@@ -9,6 +9,8 @@
  */
 import type {
   ApprovalRequestId,
+  McpServerStatus,
+  McpSetServersResult,
   ProviderApprovalDecision,
   ProviderKind,
   ProviderUserInputAnswers,
@@ -113,6 +115,36 @@ export interface ProviderAdapterShape<TError> {
    * Get cached slash commands from the most recent session (provider-level cache).
    */
   readonly getCachedSlashCommands?: () => Effect.Effect<ReadonlyArray<string>>;
+
+  /**
+   * Get MCP server status for a session.
+   */
+  readonly mcpGetStatus?: (threadId: ThreadId) => Effect.Effect<ReadonlyArray<McpServerStatus>, TError>;
+
+  /**
+   * Set (replace) dynamic MCP servers for a session.
+   */
+  readonly mcpSetServers?: (
+    threadId: ThreadId,
+    servers: Record<string, unknown>,
+  ) => Effect.Effect<McpSetServersResult, TError>;
+
+  /**
+   * Reconnect a failed MCP server.
+   */
+  readonly mcpReconnectServer?: (
+    threadId: ThreadId,
+    serverName: string,
+  ) => Effect.Effect<void, TError>;
+
+  /**
+   * Enable or disable an MCP server.
+   */
+  readonly mcpToggleServer?: (
+    threadId: ThreadId,
+    serverName: string,
+    enabled: boolean,
+  ) => Effect.Effect<void, TError>;
 
   /**
    * Read a provider thread snapshot.

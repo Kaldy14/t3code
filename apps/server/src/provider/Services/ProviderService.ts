@@ -12,6 +12,8 @@
  * @module ProviderService
  */
 import type {
+  McpServerStatus,
+  McpSetServersResult,
   ProviderInterruptTurnInput,
   ProviderKind,
   ProviderRespondToRequestInput,
@@ -112,6 +114,38 @@ export interface ProviderServiceShape {
   readonly getCachedSlashCommands?: (
     providerKind: ProviderKind,
   ) => Effect.Effect<ReadonlyArray<string>, ProviderServiceError>;
+
+  /**
+   * Get MCP server status for a thread's session.
+   */
+  readonly mcpGetStatus?: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ReadonlyArray<McpServerStatus>, ProviderServiceError>;
+
+  /**
+   * Set (replace) dynamic MCP servers for a thread's session.
+   */
+  readonly mcpSetServers?: (
+    threadId: ThreadId,
+    servers: Record<string, unknown>,
+  ) => Effect.Effect<McpSetServersResult, ProviderServiceError>;
+
+  /**
+   * Reconnect a failed MCP server.
+   */
+  readonly mcpReconnectServer?: (
+    threadId: ThreadId,
+    serverName: string,
+  ) => Effect.Effect<void, ProviderServiceError>;
+
+  /**
+   * Enable or disable an MCP server.
+   */
+  readonly mcpToggleServer?: (
+    threadId: ThreadId,
+    serverName: string,
+    enabled: boolean,
+  ) => Effect.Effect<void, ProviderServiceError>;
 
   /**
    * Stop all active provider sessions across all adapters.

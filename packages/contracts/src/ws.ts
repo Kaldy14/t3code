@@ -34,6 +34,12 @@ import {
 import { KeybindingRule } from "./keybindings";
 import { ProjectSearchEntriesInput, ProjectWriteFileInput } from "./project";
 import { OpenInEditorInput } from "./editor";
+import {
+  McpGetStatusInput,
+  McpSetServersInput,
+  McpReconnectServerInput,
+  McpToggleServerInput,
+} from "./mcp";
 
 // ── WebSocket RPC Method Names ───────────────────────────────────────
 
@@ -70,6 +76,13 @@ export const WS_METHODS = {
   // Server meta
   serverGetConfig: "server.getConfig",
   serverUpsertKeybinding: "server.upsertKeybinding",
+} as const;
+
+export const MCP_WS_METHODS = {
+  mcpGetStatus: "mcp.getStatus",
+  mcpSetServers: "mcp.setServers",
+  mcpReconnectServer: "mcp.reconnectServer",
+  mcpToggleServer: "mcp.toggleServer",
 } as const;
 
 // ── Push Event Channels ──────────────────────────────────────────────
@@ -135,6 +148,12 @@ const WebSocketRequestBody = Schema.Union([
   // Server meta
   tagRequestBody(WS_METHODS.serverGetConfig, Schema.Struct({})),
   tagRequestBody(WS_METHODS.serverUpsertKeybinding, KeybindingRule),
+
+  // MCP methods
+  tagRequestBody(MCP_WS_METHODS.mcpGetStatus, McpGetStatusInput),
+  tagRequestBody(MCP_WS_METHODS.mcpSetServers, McpSetServersInput),
+  tagRequestBody(MCP_WS_METHODS.mcpReconnectServer, McpReconnectServerInput),
+  tagRequestBody(MCP_WS_METHODS.mcpToggleServer, McpToggleServerInput),
 ]);
 
 export const WebSocketRequest = Schema.Struct({

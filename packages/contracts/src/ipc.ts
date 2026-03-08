@@ -43,6 +43,14 @@ import type {
   OrchestrationReadModel,
   OrchestrationGetSlashCommandsInput,
 } from "./orchestration";
+import type {
+  McpGetStatusInput,
+  McpGetStatusResult,
+  McpSetServersInput,
+  McpSetServersResult,
+  McpReconnectServerInput,
+  McpToggleServerInput,
+} from "./mcp";
 import { EditorId } from "./editor";
 
 export interface ContextMenuItem<T extends string = string> {
@@ -156,5 +164,11 @@ export interface NativeApi {
       input: OrchestrationGetSlashCommandsInput,
     ) => Promise<{ commands: ReadonlyArray<string> }>;
     onDomainEvent: (callback: (event: OrchestrationEvent) => void) => () => void;
+  };
+  mcp: {
+    getStatus: (input: McpGetStatusInput) => Promise<McpGetStatusResult>;
+    setServers: (input: McpSetServersInput) => Promise<McpSetServersResult>;
+    reconnectServer: (input: McpReconnectServerInput) => Promise<void>;
+    toggleServer: (input: McpToggleServerInput) => Promise<void>;
   };
 }

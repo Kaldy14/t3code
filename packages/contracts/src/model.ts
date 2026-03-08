@@ -7,6 +7,12 @@ export type CursorReasoningOption = (typeof CURSOR_REASONING_OPTIONS)[number];
 export const CODEX_REASONING_EFFORT_OPTIONS = ["xhigh", "high", "medium", "low"] as const;
 export type CodexReasoningEffort = (typeof CODEX_REASONING_EFFORT_OPTIONS)[number];
 
+export const CLAUDE_CODE_EFFORT_OPTIONS = ["high", "medium", "low"] as const;
+export type ClaudeCodeEffort = (typeof CLAUDE_CODE_EFFORT_OPTIONS)[number];
+
+/** Union of all provider effort/reasoning level values. */
+export type ProviderEffort = CodexReasoningEffort | ClaudeCodeEffort;
+
 export const CodexModelOptions = Schema.Struct({
   reasoningEffort: Schema.optional(Schema.Literals(CODEX_REASONING_EFFORT_OPTIONS)),
   fastMode: Schema.optional(Schema.Boolean),
@@ -15,6 +21,7 @@ export type CodexModelOptions = typeof CodexModelOptions.Type;
 
 export const ClaudeCodeModelOptions = Schema.Struct({
   thinking: Schema.optional(Schema.Boolean),
+  effort: Schema.optional(Schema.Literals(CLAUDE_CODE_EFFORT_OPTIONS)),
 });
 export type ClaudeCodeModelOptions = typeof ClaudeCodeModelOptions.Type;
 
@@ -147,12 +154,12 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER = {
 
 export const REASONING_EFFORT_OPTIONS_BY_PROVIDER = {
   codex: CODEX_REASONING_EFFORT_OPTIONS,
-  claudeCode: [],
+  claudeCode: CLAUDE_CODE_EFFORT_OPTIONS,
   cursor: [],
-} as const satisfies Record<ProviderKind, readonly CodexReasoningEffort[]>;
+} as const satisfies Record<ProviderKind, readonly ProviderEffort[]>;
 
 export const DEFAULT_REASONING_EFFORT_BY_PROVIDER = {
   codex: "high",
-  claudeCode: null,
+  claudeCode: "high",
   cursor: null,
-} as const satisfies Record<ProviderKind, CodexReasoningEffort | null>;
+} as const satisfies Record<ProviderKind, ProviderEffort | null>;

@@ -1,4 +1,5 @@
 import {
+  MCP_WS_METHODS,
   OrchestrationEvent,
   ORCHESTRATION_WS_CHANNELS,
   ORCHESTRATION_WS_METHODS,
@@ -206,6 +207,12 @@ export function createWsNativeApi(): NativeApi {
           const payload = decodeAndWarnOnFailure(OrchestrationEvent, data);
           if (payload) callback(payload);
         }),
+    },
+    mcp: {
+      getStatus: (input) => transport.request(MCP_WS_METHODS.mcpGetStatus, input),
+      setServers: (input) => transport.request(MCP_WS_METHODS.mcpSetServers, input),
+      reconnectServer: (input) => transport.request(MCP_WS_METHODS.mcpReconnectServer, input),
+      toggleServer: (input) => transport.request(MCP_WS_METHODS.mcpToggleServer, input),
     },
   };
 

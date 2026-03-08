@@ -3,7 +3,7 @@ import {
   ProjectId,
   REASONING_EFFORT_OPTIONS_BY_PROVIDER,
   ThreadId,
-  type CodexReasoningEffort,
+  type ProviderEffort,
   type ProviderKind,
   type ProviderInteractionMode,
   type RuntimeMode,
@@ -40,7 +40,7 @@ interface PersistedComposerThreadDraftState {
   model?: string | null;
   runtimeMode?: RuntimeMode | null;
   interactionMode?: ProviderInteractionMode | null;
-  effort?: CodexReasoningEffort | null;
+  effort?: ProviderEffort | null;
   codexFastMode?: boolean | null;
   serviceTier?: string | null;
 }
@@ -129,7 +129,7 @@ interface ComposerDraftStoreState {
     threadId: ThreadId,
     interactionMode: ProviderInteractionMode | null | undefined,
   ) => void;
-  setEffort: (threadId: ThreadId, effort: CodexReasoningEffort | null | undefined) => void;
+  setEffort: (threadId: ThreadId, effort: ProviderEffort | null | undefined) => void;
   setCodexFastMode: (threadId: ThreadId, enabled: boolean | null | undefined) => void;
   addImage: (threadId: ThreadId, image: ComposerImageAttachment) => void;
   addImages: (threadId: ThreadId, images: ComposerImageAttachment[]) => void;
@@ -168,9 +168,10 @@ const EMPTY_THREAD_DRAFT = Object.freeze({
   codexFastMode: false,
 }) as ComposerThreadDraftState;
 
-const REASONING_EFFORT_VALUES = new Set<CodexReasoningEffort>(
-  REASONING_EFFORT_OPTIONS_BY_PROVIDER.codex,
-);
+const REASONING_EFFORT_VALUES = new Set<ProviderEffort>([
+  ...REASONING_EFFORT_OPTIONS_BY_PROVIDER.codex,
+  ...REASONING_EFFORT_OPTIONS_BY_PROVIDER.claudeCode,
+]);
 
 function createEmptyThreadDraft(): ComposerThreadDraftState {
   return {
@@ -893,11 +894,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           return;
         }
         const nextEffort =
-          effort &&
-          REASONING_EFFORT_VALUES.has(effort) &&
-          effort !== DEFAULT_REASONING_EFFORT_BY_PROVIDER.codex
-            ? effort
-            : null;
+          effort && REASONING_EFFORT_VALUES.has(effort) ? effort : null;
         set((state) => {
           const existing = state.draftsByThreadId[threadId];
           if (!existing && nextEffort === null) {
