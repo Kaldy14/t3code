@@ -29,6 +29,8 @@ export const ProjectionThreadActivity = Schema.Struct({
   payload: Schema.Unknown,
   sequence: Schema.optional(NonNegativeInt),
   createdAt: IsoDateTime,
+  taskId: Schema.optional(Schema.NullOr(Schema.String)),
+  parentToolUseId: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type ProjectionThreadActivity = typeof ProjectionThreadActivity.Type;
 

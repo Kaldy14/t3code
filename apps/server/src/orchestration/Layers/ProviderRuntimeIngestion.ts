@@ -94,12 +94,81 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
+function asInt(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  return null;
+}
+
+function asFloat(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  return null;
+}
+
+function extractUsageFromUnknown(usage: unknown): {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheWriteTokens: number | null;
+  totalCostUsd: number | null;
+} {
+  if (!usage || typeof usage !== "object") {
+    return {
+      inputTokens: null,
+      outputTokens: null,
+      cacheReadTokens: null,
+      cacheWriteTokens: null,
+      totalCostUsd: null,
+    };
+  }
+  const u = usage as Record<string, unknown>;
+  return {
+    inputTokens: asInt(u["input_tokens"]),
+    outputTokens: asInt(u["output_tokens"]),
+    cacheReadTokens: asInt(u["cache_read_input_tokens"]),
+    cacheWriteTokens: asInt(u["cache_creation_input_tokens"]),
+    totalCostUsd: null, // extracted from top-level total_cost_usd, not usage object
+  };
+}
+
 function runtimePayloadRecord(event: ProviderRuntimeEvent): Record<string, unknown> | undefined {
   const payload = (event as { payload?: unknown }).payload;
   if (!payload || typeof payload !== "object") {
     return undefined;
   }
   return payload as Record<string, unknown>;
+}
+
+// ── In-memory ephemeral stores for context window ────────
+
+/**
+ * Extract context window size from modelUsage in a turn.completed payload.
+ * modelUsage is `Record<string, ModelUsage>` where ModelUsage has `contextWindow: number`.
+ */
+function extractContextWindowFromModelUsage(modelUsage: unknown): number | null {
+  if (!modelUsage || typeof modelUsage !== "object") return null;
+  const entries = Object.values(modelUsage as Record<string, unknown>);
+  let maxContextWindow: number | null = null;
+  for (const entry of entries) {
+    if (entry && typeof entry === "object") {
+      const cw = (entry as Record<string, unknown>)["contextWindow"];
+      if (typeof cw === "number" && Number.isFinite(cw) && cw > 0) {
+        maxContextWindow = maxContextWindow === null ? cw : Math.max(maxContextWindow, cw);
+      }
+    }
+  }
+  return maxContextWindow;
+}
+
+// Global in-memory store (keyed by threadId)
+const contextWindowStore = new Map<string, number>();
+
+/** Get the latest context window size for a thread. */
+export function getThreadContextWindowSize(threadId: string): number | null {
+  return contextWindowStore.get(threadId) ?? null;
 }
 
 function normalizeRuntimeTurnState(
@@ -360,6 +429,8 @@ function runtimeEventToActivities(
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
+          taskId: event.payload.taskId,
+          ...(event.payload.parentToolUseId ? { parentToolUseId: event.payload.parentToolUseId } : {}),
         },
       ];
     }
@@ -380,6 +451,8 @@ function runtimeEventToActivities(
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
+          taskId: event.payload.taskId,
+          ...(event.payload.parentToolUseId ? { parentToolUseId: event.payload.parentToolUseId } : {}),
         },
       ];
     }
@@ -405,6 +478,8 @@ function runtimeEventToActivities(
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
+          taskId: event.payload.taskId,
+          ...(event.payload.parentToolUseId ? { parentToolUseId: event.payload.parentToolUseId } : {}),
         },
       ];
     }
@@ -472,6 +547,42 @@ function runtimeEventToActivities(
           ...maybeSequence,
         },
       ];
+    }
+
+    case "session.state.changed": {
+      if (event.payload.reason === "status:compacting") {
+        return [
+          {
+            id: event.eventId,
+            createdAt: event.createdAt,
+            tone: "info",
+            kind: "session.compacting",
+            summary: "Compacting context…",
+            payload: {},
+            turnId: toTurnId(event.turnId) ?? null,
+            ...maybeSequence,
+          },
+        ];
+      }
+      return [];
+    }
+
+    case "thread.state.changed": {
+      if (event.payload.state === "compacted") {
+        return [
+          {
+            id: event.eventId,
+            createdAt: event.createdAt,
+            tone: "info",
+            kind: "session.compacted",
+            summary: "Context compacted",
+            payload: {},
+            turnId: toTurnId(event.turnId) ?? null,
+            ...maybeSequence,
+          },
+        ];
+      }
+      return [];
     }
 
     default:
@@ -995,11 +1106,72 @@ const make = Effect.gen(function* () {
             turnId,
             updatedAt: now,
           });
+
+          // Extract and persist usage metrics (non-fatal — must not break turn completion)
+          yield* Effect.gen(function* () {
+            const payload = runtimePayloadRecord(event);
+            const usage = payload?.["usage"];
+            const extracted = extractUsageFromUnknown(usage);
+            const totalCostUsd = asFloat(payload?.["totalCostUsd"]) ?? asFloat(payload?.["total_cost_usd"]);
+            const model = asString(payload?.["model"]) ?? null;
+
+            // Extract contextWindow from modelUsage and store in-memory
+            const modelUsageRaw = payload?.["modelUsage"];
+            const contextWindow = extractContextWindowFromModelUsage(modelUsageRaw);
+            if (contextWindow !== null) {
+              contextWindowStore.set(thread.id, contextWindow);
+            }
+
+            yield* orchestrationEngine.dispatch({
+              type: "thread.turn.usage.update",
+              commandId: providerCommandId(event, "turn-usage-update"),
+              threadId: thread.id,
+              turnId,
+              inputTokens: extracted.inputTokens,
+              outputTokens: extracted.outputTokens,
+              cacheReadTokens: extracted.cacheReadTokens,
+              cacheWriteTokens: extracted.cacheWriteTokens,
+              totalCostUsd,
+              model,
+              createdAt: now,
+            });
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Failed to persist turn usage metrics", { cause: Cause.squash(cause) }),
+            ),
+          );
         }
       }
 
       if (event.type === "session.exited") {
         yield* clearTurnStateForSession(thread.id);
+      }
+
+      if (event.type === "thread.token-usage.updated") {
+        const turnId = toTurnId(event.turnId) ?? (activeTurnId !== null ? activeTurnId : undefined);
+        if (turnId) {
+          yield* Effect.gen(function* () {
+            const extracted = extractUsageFromUnknown(event.payload.usage);
+            const totalCostUsd = asFloat((event.payload.usage as Record<string, unknown>)?.["total_cost_usd"]);
+            yield* orchestrationEngine.dispatch({
+              type: "thread.turn.usage.update",
+              commandId: providerCommandId(event, "token-usage-update"),
+              threadId: thread.id,
+              turnId,
+              inputTokens: extracted.inputTokens,
+              outputTokens: extracted.outputTokens,
+              cacheReadTokens: extracted.cacheReadTokens,
+              cacheWriteTokens: extracted.cacheWriteTokens,
+              totalCostUsd,
+              model: null,
+              createdAt: now,
+            });
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Failed to persist token usage metrics", { cause: Cause.squash(cause) }),
+            ),
+          );
+        }
       }
 
       if (event.type === "runtime.error") {

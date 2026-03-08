@@ -79,9 +79,13 @@ import {
   type PendingUserInput,
   PROVIDER_OPTIONS,
   deriveWorkLogEntries,
+  deriveSubagentGroups,
   hasToolActivityForTurn,
   isLatestTurnSettled,
   formatElapsed,
+  formatDuration,
+  formatTokenCount,
+  type SubagentGroup,
   formatTimestamp,
 } from "../session-logic";
 import { AUTO_SCROLL_BOTTOM_THRESHOLD_PX, isScrollContainerNearBottom } from "../chat-scroll";
@@ -120,6 +124,7 @@ import {
 } from "../lib/turnDiffTree";
 import BranchToolbar from "./BranchToolbar";
 import GitActionsControl from "./GitActionsControl";
+import { SessionHud } from "./SessionHud";
 import {
   isOpenFavoriteEditorShortcut,
   resolveShortcutCommand,
@@ -127,7 +132,7 @@ import {
 } from "../keybindings";
 import ChatMarkdown from "./ChatMarkdown";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
-import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
+import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import {
   BotIcon,
   ChevronDownIcon,
@@ -136,6 +141,7 @@ import {
   CircleAlertIcon,
   FileIcon,
   FolderIcon,
+  InfoIcon,
   DiffIcon,
   EllipsisIcon,
   FolderClosedIcon,
@@ -241,6 +247,7 @@ const EMPTY_PROJECT_ENTRIES: ProjectEntry[] = [];
 const EMPTY_AVAILABLE_EDITORS: EditorId[] = [];
 const EMPTY_PROVIDER_STATUSES: ServerProviderStatus[] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+const EMPTY_SLASH_COMMANDS: readonly string[] = [];
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
@@ -271,8 +278,225 @@ function workToneClass(tone: "thinking" | "tool" | "info" | "error"): string {
   return "text-muted-foreground/40";
 }
 
+function formatTaskTypeLabel(taskType: string | undefined): string {
+  if (!taskType) return "Agent";
+  switch (taskType) {
+    case "local_agent":
+      return "Agent";
+    case "team_worker":
+    case "teammate":
+      return "Worker";
+    case "plan":
+      return "Planner";
+    default:
+      // Capitalize and clean up unknown types
+      return taskType.replace(/[_-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+}
+
 function normalizePlanMarkdownForExport(planMarkdown: string): string {
   return `${planMarkdown.trimEnd()}\n`;
+}
+
+function SubagentCard({
+  subagent,
+  nowIso,
+}: {
+  subagent: SubagentGroup;
+  nowIso: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const isRunning = subagent.status === "running";
+  const isFailed = subagent.status === "failed";
+  const isStopped = subagent.status === "stopped";
+  const isCompleted = !isRunning && !isFailed && !isStopped;
+
+  const elapsed =
+    subagent.usage?.durationMs != null
+      ? formatDuration(subagent.usage.durationMs)
+      : subagent.startedAt
+        ? formatElapsed(subagent.startedAt, subagent.completedAt ?? nowIso)
+        : null;
+
+  const tokenLabel =
+    subagent.usage?.totalTokens != null ? formatTokenCount(subagent.usage.totalTokens) : null;
+
+  const toolCount = subagent.usage?.toolUses ?? subagent.childActivities.length;
+  const taskTypeLabel = formatTaskTypeLabel(subagent.taskType);
+  const hasChildren = subagent.childActivities.length > 0;
+
+  const accentColor = isRunning
+    ? "blue"
+    : isFailed
+      ? "rose"
+      : isStopped
+        ? "amber"
+        : "emerald";
+
+  return (
+    <div
+      className={cn(
+        "group/agent rounded-lg border px-3 py-2 transition-colors duration-150",
+        isRunning && "border-blue-400/40 bg-blue-500/5",
+        isFailed && "border-rose-400/40 bg-rose-500/5",
+        isStopped && "border-amber-400/40 bg-amber-500/5",
+        isCompleted && "border-border/80 bg-card/45",
+      )}
+    >
+      {/* Header row */}
+        <button
+          type="button"
+          className="flex w-full items-center gap-2 text-left"
+          onClick={() => hasChildren && setExpanded((v) => !v)}
+        >
+          {/* Status icon */}
+          {isRunning ? (
+            <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
+              <span className="absolute h-3 w-3 rounded-full bg-blue-400/20 animate-pulse" />
+              <span className="relative h-1.5 w-1.5 rounded-full bg-blue-400" />
+            </span>
+          ) : isFailed ? (
+            <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+              <svg className="h-3 w-3 text-rose-400/80" viewBox="0 0 12 12" fill="none">
+                <path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+            </span>
+          ) : isStopped ? (
+            <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+              <span className="h-2 w-2 rounded-[2px] border-[1.5px] border-amber-400/70" />
+            </span>
+          ) : (
+            <span className="flex h-4 w-4 shrink-0 items-center justify-center">
+              <svg className="h-3 w-3 text-emerald-400/80" viewBox="0 0 12 12" fill="none">
+                <path d="M2.5 6l3 3 4.5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </span>
+          )}
+
+          {/* Label */}
+          <span
+            className={cn(
+              "text-[10px] font-medium uppercase tracking-[0.1em]",
+              isRunning && "text-blue-400/80",
+              isFailed && "text-rose-400/70",
+              isStopped && "text-amber-400/70",
+              isCompleted && "text-emerald-400/60",
+            )}
+          >
+            {taskTypeLabel}
+          </span>
+
+          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/75">
+            {subagent.description}
+          </span>
+
+          {/* Metric pills */}
+          <div className="flex shrink-0 items-center gap-1.5">
+            {toolCount > 0 && (
+              <span className="rounded-full bg-muted/60 px-1.5 py-px text-[9px] tabular-nums text-muted-foreground/50">
+                {toolCount} {toolCount === 1 ? "tool" : "tools"}
+              </span>
+            )}
+            {tokenLabel && (
+              <span className="rounded-full bg-muted/60 px-1.5 py-px text-[9px] tabular-nums text-muted-foreground/50">
+                {tokenLabel}
+              </span>
+            )}
+            {elapsed && (
+              <span className="rounded-full bg-muted/60 px-1.5 py-px text-[9px] tabular-nums text-muted-foreground/50">
+                {elapsed}
+              </span>
+            )}
+          </div>
+
+          {/* Expand chevron */}
+          {hasChildren && (
+            <span
+              className={cn(
+                "shrink-0 text-[9px] text-muted-foreground/35 transition-transform duration-150",
+                expanded && "rotate-180",
+              )}
+            >
+              &#x25BE;
+            </span>
+          )}
+        </button>
+
+        {/* Summary preview (collapsed only) */}
+        {subagent.summary && !expanded && (
+          <p className="mt-1 truncate pl-6 text-[11px] leading-relaxed text-muted-foreground/40">
+            {subagent.summary}
+          </p>
+        )}
+
+        {/* Expandable children */}
+        <div
+          className={cn(
+            "grid transition-[grid-template-rows] duration-200 ease-out",
+            expanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]",
+          )}
+        >
+          <div className="overflow-hidden">
+            {hasChildren && (
+              <div className="relative mt-2 pl-[7px]">
+                {/* Connecting line */}
+                <div
+                  className={cn(
+                    "absolute left-[7px] top-0 bottom-2 w-px",
+                    accentColor === "blue" && "bg-blue-400/15",
+                    accentColor === "rose" && "bg-rose-400/15",
+                    accentColor === "amber" && "bg-amber-400/15",
+                    accentColor === "emerald" && "bg-emerald-400/15",
+                  )}
+                />
+                <div className="space-y-0.5">
+                  {subagent.childActivities.map((child) => (
+                    <div
+                      key={`subagent-child:${child.id}`}
+                      className="relative flex items-start gap-2.5 py-0.5 pl-2.5"
+                    >
+                      {/* Branch dot on connecting line */}
+                      <span
+                        className={cn(
+                          "absolute left-0 top-[9px] h-1 w-1 rounded-full",
+                          accentColor === "blue" && "bg-blue-400/30",
+                          accentColor === "rose" && "bg-rose-400/30",
+                          accentColor === "amber" && "bg-amber-400/30",
+                          accentColor === "emerald" && "bg-emerald-400/25",
+                        )}
+                      />
+                      <p
+                        className={`py-[2px] text-[11px] leading-relaxed ${workToneClass(child.tone)}`}
+                      >
+                        {child.detail ? (
+                          <>
+                            {child.label}
+                            <span
+                              className="ml-1.5 inline-block max-w-[50ch] truncate align-bottom font-mono text-[11px] opacity-50"
+                              title={child.detail}
+                            >
+                              {child.detail}
+                            </span>
+                          </>
+                        ) : (
+                          child.label
+                        )}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {subagent.summary && (
+              <p className="mt-2 border-t border-border/30 pt-2 pl-2.5 text-[11px] leading-relaxed text-muted-foreground/55">
+                {subagent.summary}
+              </p>
+            )}
+          </div>
+        </div>
+    </div>
+  );
 }
 
 function downloadTextFile(filename: string, contents: string): void {
@@ -395,6 +619,13 @@ type ComposerCommandItem =
     }
   | {
       id: string;
+      type: "provider-command";
+      commandName: string;
+      label: string;
+      description: string;
+    }
+  | {
+      id: string;
       type: "model";
       provider: ProviderKind;
       model: ModelSlug;
@@ -502,7 +733,7 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
           theme={props.resolvedTheme}
         />
       ) : null}
-      {props.item.type === "slash-command" ? (
+      {props.item.type === "slash-command" || props.item.type === "provider-command" ? (
         <BotIcon className="size-4 text-muted-foreground/80" />
       ) : null}
       {props.item.type === "model" ? (
@@ -786,6 +1017,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
     hasThreadStarted && selectedProvider === "cursor"
       ? "Cursor currently does not support changing models after the first message in a thread."
       : null;
+  const baseThreadModel = resolveModelSlugForProvider(
+    selectedProvider,
+    activeThread?.model ?? activeProject?.model ?? getDefaultModel(selectedProvider),
+  );
   const selectedModel = useMemo(() => {
     const draftModel = composerDraft.model;
     if (!draftModel) {
@@ -885,6 +1120,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   const workLogEntries = useMemo(
     () => deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
+    [activeLatestTurn?.turnId, threadActivities],
+  );
+  const subagentGroups = useMemo(
+    () => deriveSubagentGroups(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
   const latestTurnHasToolActivity = useMemo(
@@ -1092,8 +1331,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [serverMessages, attachmentPreviewHandoffByMessageId, optimisticUserMessages]);
   const timelineEntries = useMemo(
     () =>
-      deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
-    [activeThread?.proposedPlans, timelineMessages, workLogEntries],
+      deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries, subagentGroups),
+    [activeThread?.proposedPlans, timelineMessages, workLogEntries, subagentGroups],
   );
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
     useTurnDiffSummaries(activeThread);
@@ -1204,6 +1443,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }),
   );
   const workspaceEntries = workspaceEntriesQuery.data?.entries ?? EMPTY_PROJECT_ENTRIES;
+  const hasActiveSession = Boolean(activeThread?.session);
+  const slashCommandsQuery = useQuery({
+    queryKey: ["slashCommands", activeThreadId],
+    queryFn: async () => {
+      const api = readNativeApi();
+      if (!api || !activeThreadId) return { commands: [] as readonly string[] };
+      return api.orchestration.getSlashCommands({ threadId: activeThreadId });
+    },
+    enabled: Boolean(activeThreadId) && hasActiveSession,
+    staleTime: 60_000,
+  });
+  const providerSlashCommands = slashCommandsQuery.data?.commands ?? EMPTY_SLASH_COMMANDS;
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "path") {
@@ -1241,12 +1492,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
           description: "Switch this thread back to normal chat mode",
         },
       ] satisfies ReadonlyArray<Extract<ComposerCommandItem, { type: "slash-command" }>>;
+      // Add provider-reported slash commands (from Claude Code SDK init)
+      const providerItems: Extract<ComposerCommandItem, { type: "provider-command" }>[] =
+        providerSlashCommands.map((name) => ({
+          id: `provider-cmd:${name}`,
+          type: "provider-command" as const,
+          commandName: name,
+          label: `/${name}`,
+          description: "Provider command",
+        }));
+      const allItems = [...slashCommandItems, ...providerItems];
       const query = composerTrigger.query.trim().toLowerCase();
       if (!query) {
-        return [...slashCommandItems];
+        return allItems;
       }
-      return slashCommandItems.filter(
-        (item) => item.command.includes(query) || item.label.slice(1).includes(query),
+      return allItems.filter(
+        (item) => item.label.slice(1).toLowerCase().includes(query),
       );
     }
 
@@ -1268,7 +1529,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         showFastBadge:
           provider === "codex" && shouldShowFastTierIcon(slug, selectedServiceTierSetting),
       }));
-  }, [composerTrigger, searchableModelOptions, selectedServiceTierSetting, workspaceEntries]);
+  }, [composerTrigger, searchableModelOptions, selectedServiceTierSetting, workspaceEntries, providerSlashCommands]);
   const composerMenuOpen = Boolean(composerTrigger);
   const activeComposerMenuItem = useMemo(
     () =>
@@ -3243,6 +3504,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
         }
         return;
       }
+      if (item.type === "provider-command") {
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          trigger.rangeEnd,
+          `/${item.commandName} `,
+          { expectedText: expectedToken },
+        );
+        if (applied) {
+          setComposerHighlightedItemId(null);
+        }
+        return;
+      }
       onProviderModelSelect(item.provider, item.model);
       const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
         expectedText: expectedToken,
@@ -3444,6 +3717,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
         />
       </header>
 
+      {/* Session HUD */}
+      {hasThreadStarted && (
+        <SessionHud
+          threadId={activeThread.id}
+          model={activeThread.model}
+          sessionStartedAt={activeLatestTurn?.startedAt ?? activeThread.session?.createdAt ?? null}
+          isActive={!latestTurnSettled}
+          latestTurnCompletedAt={activeLatestTurn?.completedAt ?? null}
+        />
+      )}
+
       {/* Error banner */}
       <ProviderHealthBanner status={activeProviderStatus} />
       <ThreadErrorBanner error={activeThread.error} />
@@ -3495,7 +3779,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       </div>
 
       {/* Input bar */}
-      <div className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}>
+      <div className="px-3 pb-3 pt-1.5 sm:px-5 sm:pb-4 sm:pt-2">
         <form
           ref={composerFormRef}
           onSubmit={onSend}
@@ -3894,18 +4178,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 </div>
               </div>
             )}
+
+            {isGitRepo && (
+              <BranchToolbar
+                threadId={activeThread.id}
+                onEnvModeChange={onEnvModeChange}
+                envLocked={envLocked}
+                onComposerFocusRequest={scheduleComposerFocus}
+              />
+            )}
           </div>
         </form>
       </div>
-
-      {isGitRepo && (
-        <BranchToolbar
-          threadId={activeThread.id}
-          onEnvModeChange={onEnvModeChange}
-          envLocked={envLocked}
-          onComposerFocusRequest={scheduleComposerFocus}
-        />
-      )}
 
       {(() => {
         if (!terminalState.terminalOpen || !activeProject) {
@@ -4223,6 +4507,83 @@ const ComposerPendingApprovalActions = memo(function ComposerPendingApprovalActi
         Approve once
       </Button>
     </>
+  );
+});
+
+interface PendingApprovalsPanelProps {
+  pendingApprovals: PendingApproval[];
+  respondingRequestIds: ApprovalRequestId[];
+  onRespondToApproval: (
+    requestId: ApprovalRequestId,
+    decision: ProviderApprovalDecision,
+  ) => Promise<void>;
+}
+
+const PendingApprovalsPanel = memo(function PendingApprovalsPanel({
+  pendingApprovals,
+  respondingRequestIds,
+  onRespondToApproval,
+}: PendingApprovalsPanelProps) {
+  if (pendingApprovals.length === 0) return null;
+  return (
+    <div className="pt-3 mx-auto max-w-3xl space-y-2">
+      {pendingApprovals.map((approval) => {
+        const isResponding = respondingRequestIds.includes(approval.requestId);
+
+        return (
+          <Alert variant="warning" key={approval.requestId}>
+            <InfoIcon />
+            <AlertTitle className="text-xs">
+              {approval.requestKind === "command"
+                ? "Command approval requested"
+                : approval.requestKind === "file-read"
+                  ? "File-read approval requested"
+                  : "File-change approval requested"}
+            </AlertTitle>
+            <AlertDescription
+              className="truncate block font-mono text-[11px]"
+              title={approval.detail}
+            >
+              {approval.detail}
+            </AlertDescription>
+            <AlertAction className="col-start-2! -col-end-1! mt-1.5 sm:row-start-auto sm:row-end-auto">
+              <Button
+                size="xs"
+                variant="default"
+                disabled={isResponding}
+                onClick={() => void onRespondToApproval(approval.requestId, "accept")}
+              >
+                Approve once
+              </Button>
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={isResponding}
+                onClick={() => void onRespondToApproval(approval.requestId, "acceptForSession")}
+              >
+                Always allow this session
+              </Button>
+              <Button
+                size="xs"
+                variant="destructive-outline"
+                disabled={isResponding}
+                onClick={() => void onRespondToApproval(approval.requestId, "decline")}
+              >
+                Decline
+              </Button>
+              <Button
+                size="xs"
+                variant="ghost"
+                disabled={isResponding}
+                onClick={() => void onRespondToApproval(approval.requestId, "cancel")}
+              >
+                Cancel turn
+              </Button>
+            </AlertAction>
+          </Alert>
+        );
+      })}
+    </div>
   );
 });
 
@@ -4738,6 +5099,7 @@ type TimelineEntry = ReturnType<typeof deriveTimelineEntries>[number];
 type TimelineMessage = Extract<TimelineEntry, { kind: "message" }>["message"];
 type TimelineProposedPlan = Extract<TimelineEntry, { kind: "proposed-plan" }>["proposedPlan"];
 type TimelineWorkEntry = Extract<TimelineEntry, { kind: "work" }>["entry"];
+type TimelineSubagent = Extract<TimelineEntry, { kind: "subagent" }>["subagent"];
 type TimelineRow =
   | {
       kind: "work";
@@ -4757,6 +5119,12 @@ type TimelineRow =
       id: string;
       createdAt: string;
       proposedPlan: TimelineProposedPlan;
+    }
+  | {
+      kind: "subagent";
+      id: string;
+      createdAt: string;
+      subagent: TimelineSubagent;
     }
   | { kind: "working"; id: string; createdAt: string | null };
 
@@ -4840,6 +5208,16 @@ const MessagesTimeline = memo(function MessagesTimeline({
           groupedEntries,
         });
         index = cursor - 1;
+        continue;
+      }
+
+      if (timelineEntry.kind === "subagent") {
+        nextRows.push({
+          kind: "subagent",
+          id: timelineEntry.id,
+          createdAt: timelineEntry.createdAt,
+          subagent: timelineEntry.subagent,
+        });
         continue;
       }
 
@@ -4927,6 +5305,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
       const row = rows[index];
       if (!row) return 96;
       if (row.kind === "work") return 112;
+      if (row.kind === "subagent") return 120;
       if (row.kind === "proposed-plan") return estimateTimelineProposedPlanHeight(row.proposedPlan);
       if (row.kind === "working") return 40;
       return estimateTimelineMessageHeight(row.message, { timelineWidthPx });
@@ -5224,6 +5603,8 @@ const MessagesTimeline = memo(function MessagesTimeline({
           />
         </div>
       )}
+
+      {row.kind === "subagent" && <SubagentCard subagent={row.subagent} nowIso={nowIso} />}
 
       {row.kind === "working" && (
         <div className="flex items-center gap-2 py-0.5 pl-1.5">

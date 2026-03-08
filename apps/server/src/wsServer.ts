@@ -56,6 +56,10 @@ import { ProviderService } from "./provider/Services/ProviderService";
 import { ProviderHealth } from "./provider/Services/ProviderHealth";
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery";
 import { clamp } from "effect/Number";
+import {
+  getThreadContextWindowSize,
+} from "./orchestration/Layers/ProviderRuntimeIngestion";
+import { getOAuthRateLimits } from "./oauthUsageApi";
 import { Open, resolveAvailableEditors } from "./open";
 import { ServerConfig } from "./config";
 import { GitCore } from "./git/Services/GitCore.ts";
@@ -717,6 +721,53 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
             }),
           ),
         ).pipe(Effect.map((events) => Array.from(events)));
+      }
+
+      case ORCHESTRATION_WS_METHODS.getSlashCommands: {
+        const { threadId } = request.body;
+        const commands = liveProviderService.getSlashCommands
+          ? yield* liveProviderService.getSlashCommands(threadId)
+          : [];
+        return { commands };
+      }
+
+      case ORCHESTRATION_WS_METHODS.getSessionMetrics: {
+        const { threadId } = request.body;
+        const metrics = yield* projectionReadModelQuery.getSessionMetrics(threadId);
+        // Merge in-memory ephemeral data (context window from SDK)
+        const contextWindowSize = getThreadContextWindowSize(threadId);
+        const contextUsagePercent =
+          metrics.contextUsedTokens !== null && contextWindowSize !== null && contextWindowSize > 0
+            ? (metrics.contextUsedTokens / contextWindowSize) * 100
+            : null;
+        // Fetch rate limits from Anthropic OAuth API (cached, 30s TTL)
+        const oauthLimits = yield* Effect.promise(() => getOAuthRateLimits());
+        const rateLimits = oauthLimits
+          ? [
+              {
+                rateLimitType: "five_hour",
+                status: "allowed",
+                utilization: oauthLimits.fiveHourPercent / 100,
+                resetsAt: oauthLimits.fiveHourResetsAt,
+              },
+              ...(oauthLimits.weeklyPercent != null
+                ? [
+                    {
+                      rateLimitType: "seven_day",
+                      status: "allowed",
+                      utilization: oauthLimits.weeklyPercent / 100,
+                      resetsAt: oauthLimits.weeklyResetsAt,
+                    },
+                  ]
+                : []),
+            ]
+          : [];
+        return {
+          ...metrics,
+          contextWindowSize: contextWindowSize as typeof metrics.contextWindowSize,
+          contextUsagePercent,
+          rateLimits,
+        };
       }
 
       case WS_METHODS.projectsSearchEntries: {

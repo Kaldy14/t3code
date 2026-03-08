@@ -30,6 +30,19 @@ export interface WorkLogEntry {
   tone: "thinking" | "tool" | "info" | "error";
 }
 
+export interface SubagentGroup {
+  taskId: string;
+  parentToolUseId?: string;
+  description: string;
+  taskType?: string;
+  status: "running" | "completed" | "failed" | "stopped";
+  startedAt: string;
+  completedAt?: string;
+  summary?: string;
+  usage?: { totalTokens?: number; toolUses?: number; durationMs?: number };
+  childActivities: WorkLogEntry[];
+}
+
 export interface PendingApproval {
   requestId: ApprovalRequestId;
   requestKind: "command" | "file-read" | "file-change";
@@ -79,6 +92,12 @@ export type TimelineEntry =
       kind: "work";
       createdAt: string;
       entry: WorkLogEntry;
+    }
+  | {
+      id: string;
+      kind: "subagent";
+      createdAt: string;
+      subagent: SubagentGroup;
     };
 
 export function formatTimestamp(isoDate: string): string {
@@ -396,6 +415,8 @@ export function deriveWorkLogEntries(
     .filter((activity) => activity.kind !== "tool.started")
     .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")
     .filter((activity) => activity.summary !== "Checkpoint captured")
+    // Exclude activities that belong to a subagent group (rendered separately)
+    .filter((activity) => !activity.taskId)
     .map((activity) => {
       const payload =
         activity.payload && typeof activity.payload === "object"
@@ -412,6 +433,90 @@ export function deriveWorkLogEntries(
       }
       return entry;
     });
+}
+
+export function deriveSubagentGroups(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  latestTurnId: TurnId | undefined,
+): SubagentGroup[] {
+  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const filtered = ordered.filter((a) => (latestTurnId ? a.turnId === latestTurnId : true));
+
+  // Collect task lifecycle events grouped by taskId
+  const taskMap = new Map<
+    string,
+    {
+      started?: OrchestrationThreadActivity;
+      completed?: OrchestrationThreadActivity;
+      progress: OrchestrationThreadActivity[];
+    }
+  >();
+
+  for (const activity of filtered) {
+    if (!activity.taskId) continue;
+    const taskId = activity.taskId;
+    if (!taskMap.has(taskId)) {
+      taskMap.set(taskId, { progress: [] });
+    }
+    const entry = taskMap.get(taskId)!;
+    if (activity.kind === "task.started") {
+      entry.started = activity;
+    } else if (activity.kind === "task.completed") {
+      entry.completed = activity;
+    } else {
+      entry.progress.push(activity);
+    }
+  }
+
+  const groups: SubagentGroup[] = [];
+  for (const [taskId, task] of taskMap) {
+    const startPayload = task.started?.payload as Record<string, unknown> | undefined;
+    const completedPayload = task.completed?.payload as Record<string, unknown> | undefined;
+    const usage = completedPayload?.usage as
+      | { total_tokens?: number; tool_uses?: number; duration_ms?: number }
+      | undefined;
+
+    const group: SubagentGroup = {
+      taskId,
+      parentToolUseId: task.started?.parentToolUseId,
+      description:
+        (startPayload?.detail as string) ??
+        (startPayload?.taskType as string) ??
+        "Subagent",
+      taskType: startPayload?.taskType as string | undefined,
+      status: task.completed
+        ? ((completedPayload?.status as SubagentGroup["status"]) ?? "completed")
+        : "running",
+      startedAt: task.started?.createdAt ?? task.progress[0]?.createdAt ?? "",
+      completedAt: task.completed?.createdAt,
+      summary: completedPayload?.detail as string | undefined,
+      usage: usage
+        ? {
+            totalTokens: usage.total_tokens,
+            toolUses: usage.tool_uses,
+            durationMs: usage.duration_ms,
+          }
+        : undefined,
+      childActivities: task.progress
+        .filter((a) => a.kind !== "task.progress")
+        .map((a) => {
+          const payload =
+            a.payload && typeof a.payload === "object"
+              ? (a.payload as Record<string, unknown>)
+              : null;
+          return {
+            id: a.id,
+            createdAt: a.createdAt,
+            label: a.summary,
+            detail: (payload?.detail as string) ?? undefined,
+            tone: (a.tone === "approval" ? "info" : a.tone) as WorkLogEntry["tone"],
+          };
+        }),
+    };
+    groups.push(group);
+  }
+
+  return groups;
 }
 
 function compareActivitiesByOrder(
@@ -443,6 +548,7 @@ export function deriveTimelineEntries(
   messages: ChatMessage[],
   proposedPlans: ProposedPlan[],
   workEntries: WorkLogEntry[],
+  subagentGroups: SubagentGroup[] = [],
 ): TimelineEntry[] {
   const messageRows: TimelineEntry[] = messages.map((message) => ({
     id: message.id,
@@ -462,7 +568,13 @@ export function deriveTimelineEntries(
     createdAt: entry.createdAt,
     entry,
   }));
-  return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
+  const subagentRows: TimelineEntry[] = subagentGroups.map((subagent) => ({
+    id: `subagent:${subagent.taskId}`,
+    kind: "subagent",
+    createdAt: subagent.startedAt,
+    subagent,
+  }));
+  return [...messageRows, ...proposedPlanRows, ...workRows, ...subagentRows].toSorted((a, b) =>
     a.createdAt.localeCompare(b.createdAt),
   );
 }
@@ -479,6 +591,41 @@ export function inferCheckpointTurnCountByTurnId(
   }
   return result;
 }
+
+export function formatTokenCount(tokens: number): string {
+  if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+  if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(1)}k`;
+  return `${tokens}`;
+}
+
+export function formatCost(usd: number): string {
+  if (usd === 0) return "$0.00";
+  if (usd < 0.01) return `$${usd.toFixed(4)}`;
+  if (usd < 1) return `$${usd.toFixed(3)}`;
+  return `$${usd.toFixed(2)}`;
+}
+
+export function formatContextPercent(percent: number): string {
+  return `${Math.round(percent)}%`;
+}
+
+/**
+ * Format a future epoch timestamp (ms) as a compact remaining duration.
+ * e.g. "3h42m", "2d5h", "45m", "< 1m"
+ */
+export function formatTimeRemaining(resetsAtMs: number): string {
+  const remaining = Math.max(0, resetsAtMs - Date.now());
+  if (remaining < 60_000) return "< 1m";
+  const totalMinutes = Math.floor(remaining / 60_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  if (days > 0) return `${days}d${remainingHours}h`;
+  if (hours > 0) return minutes > 0 ? `${hours}h${minutes}m` : `${hours}h`;
+  return `${minutes}m`;
+}
+
 
 export function derivePhase(session: ThreadSession | null): SessionPhase {
   if (!session || session.status === "closed") return "disconnected";

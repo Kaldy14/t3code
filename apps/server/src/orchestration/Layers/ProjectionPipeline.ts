@@ -713,6 +713,10 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
               ? { sequence: event.payload.activity.sequence }
               : {}),
             createdAt: event.payload.activity.createdAt,
+            ...(event.payload.activity.taskId ? { taskId: event.payload.activity.taskId } : {}),
+            ...(event.payload.activity.parentToolUseId
+              ? { parentToolUseId: event.payload.activity.parentToolUseId }
+              : {}),
           });
           return;
 
@@ -837,6 +841,12 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
               checkpointRef: null,
               checkpointStatus: null,
               checkpointFiles: [],
+              inputTokens: null,
+              outputTokens: null,
+              cacheReadTokens: null,
+              cacheWriteTokens: null,
+              totalCostUsd: null,
+              model: null,
             });
           }
 
@@ -886,6 +896,12 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             checkpointRef: null,
             checkpointStatus: null,
             checkpointFiles: [],
+            inputTokens: null,
+            outputTokens: null,
+            cacheReadTokens: null,
+            cacheWriteTokens: null,
+            totalCostUsd: null,
+            model: null,
           });
           return;
         }
@@ -921,6 +937,12 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             checkpointRef: null,
             checkpointStatus: null,
             checkpointFiles: [],
+            inputTokens: null,
+            outputTokens: null,
+            cacheReadTokens: null,
+            cacheWriteTokens: null,
+            totalCostUsd: null,
+            model: null,
           });
           return;
         }
@@ -965,6 +987,12 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
             checkpointRef: event.payload.checkpointRef,
             checkpointStatus: event.payload.status,
             checkpointFiles: event.payload.files,
+            inputTokens: null,
+            outputTokens: null,
+            cacheReadTokens: null,
+            cacheWriteTokens: null,
+            totalCostUsd: null,
+            model: null,
           });
           return;
         }
@@ -993,6 +1021,25 @@ const makeOrchestrationProjectionPipeline = Effect.gen(function* () {
                   }),
             { concurrency: 1 },
           ).pipe(Effect.asVoid);
+          return;
+        }
+
+        case "thread.turn-usage-updated": {
+          const existingTurn = yield* projectionTurnRepository.getByTurnId({
+            threadId: event.payload.threadId,
+            turnId: event.payload.turnId,
+          });
+          if (Option.isSome(existingTurn)) {
+            yield* projectionTurnRepository.upsertByTurnId({
+              ...existingTurn.value,
+              inputTokens: event.payload.inputTokens,
+              outputTokens: event.payload.outputTokens,
+              cacheReadTokens: event.payload.cacheReadTokens,
+              cacheWriteTokens: event.payload.cacheWriteTokens,
+              totalCostUsd: event.payload.totalCostUsd,
+              model: event.payload.model ?? existingTurn.value.model,
+            });
+          }
           return;
         }
 

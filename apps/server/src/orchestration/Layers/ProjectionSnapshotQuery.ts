@@ -5,7 +5,9 @@ import {
   NonNegativeInt,
   OrchestrationCheckpointFile,
   OrchestrationReadModel,
+  OrchestrationSessionMetrics,
   ProjectScript,
+  ThreadId,
   TurnId,
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
@@ -74,6 +76,12 @@ const ProjectionLatestTurnDbRowSchema = Schema.Struct({
   startedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
   assistantMessageId: Schema.NullOr(MessageId),
+  inputTokens: Schema.NullOr(Schema.Int),
+  outputTokens: Schema.NullOr(Schema.Int),
+  cacheReadTokens: Schema.NullOr(Schema.Int),
+  cacheWriteTokens: Schema.NullOr(Schema.Int),
+  totalCostUsd: Schema.NullOr(Schema.Number),
+  model: Schema.NullOr(Schema.String),
 });
 const ProjectionStateDbRowSchema = ProjectionState;
 
@@ -221,7 +229,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           summary,
           payload_json AS "payload",
           sequence,
-          created_at AS "createdAt"
+          created_at AS "createdAt",
+          task_id AS "taskId",
+          parent_tool_use_id AS "parentToolUseId"
         FROM projection_thread_activities
         ORDER BY
           thread_id ASC,
@@ -284,7 +294,13 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           requested_at AS "requestedAt",
           started_at AS "startedAt",
           completed_at AS "completedAt",
-          assistant_message_id AS "assistantMessageId"
+          assistant_message_id AS "assistantMessageId",
+          input_tokens AS "inputTokens",
+          output_tokens AS "outputTokens",
+          cache_read_tokens AS "cacheReadTokens",
+          cache_write_tokens AS "cacheWriteTokens",
+          total_cost_usd AS "totalCostUsd",
+          model
         FROM projection_turns
         WHERE turn_id IS NOT NULL
         ORDER BY thread_id ASC, requested_at DESC, turn_id DESC
@@ -453,6 +469,8 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               turnId: row.turnId,
               ...(row.sequence !== null ? { sequence: row.sequence } : {}),
               createdAt: row.createdAt,
+              ...(row.taskId ? { taskId: row.taskId } : {}),
+              ...(row.parentToolUseId ? { parentToolUseId: row.parentToolUseId } : {}),
             });
             activitiesByThread.set(row.threadId, threadActivities);
           }
@@ -497,6 +515,12 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               startedAt: row.startedAt,
               completedAt: row.completedAt,
               assistantMessageId: row.assistantMessageId,
+              inputTokens: row.inputTokens,
+              outputTokens: row.outputTokens,
+              cacheReadTokens: row.cacheReadTokens,
+              cacheWriteTokens: row.cacheWriteTokens,
+              totalCostUsd: row.totalCostUsd,
+              model: row.model,
             });
           }
 
@@ -567,8 +591,128 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         }),
       );
 
+  const SessionMetricsTotalsDbRowSchema = Schema.Struct({
+    turnCount: Schema.Number,
+    totalInputTokens: Schema.Number,
+    totalOutputTokens: Schema.Number,
+    totalCostUsd: Schema.Number,
+  });
+
+  const SessionMetricsLatestTurnDbRowSchema = Schema.Struct({
+    inputTokens: Schema.NullOr(Schema.Int),
+    outputTokens: Schema.NullOr(Schema.Int),
+    cacheReadTokens: Schema.NullOr(Schema.Int),
+    cacheWriteTokens: Schema.NullOr(Schema.Int),
+  });
+
+  const querySessionMetricsTotals = SqlSchema.findOneOption({
+    Request: ThreadId,
+    Result: SessionMetricsTotalsDbRowSchema,
+    execute: (threadId) =>
+      sql`
+        SELECT
+          COUNT(*) AS "turnCount",
+          COALESCE(SUM(input_tokens), 0) AS "totalInputTokens",
+          COALESCE(SUM(output_tokens), 0) AS "totalOutputTokens",
+          COALESCE(SUM(total_cost_usd), 0) AS "totalCostUsd"
+        FROM projection_turns
+        WHERE thread_id = ${threadId}
+          AND turn_id IS NOT NULL
+          AND state IN ('completed', 'error', 'interrupted')
+      `,
+  });
+
+  const querySessionMetricsLatestTurn = SqlSchema.findOneOption({
+    Request: ThreadId,
+    Result: SessionMetricsLatestTurnDbRowSchema,
+    execute: (threadId) =>
+      sql`
+        SELECT
+          input_tokens AS "inputTokens",
+          output_tokens AS "outputTokens",
+          cache_read_tokens AS "cacheReadTokens",
+          cache_write_tokens AS "cacheWriteTokens"
+        FROM projection_turns
+        WHERE thread_id = ${threadId}
+          AND turn_id IS NOT NULL
+          AND input_tokens IS NOT NULL
+        ORDER BY requested_at DESC, turn_id DESC
+        LIMIT 1
+      `,
+  });
+
+  const getSessionMetrics: ProjectionSnapshotQueryShape["getSessionMetrics"] = (threadId) =>
+    sql
+      .withTransaction(
+        Effect.gen(function* () {
+          const [totalsOption, latestTurnOption] = yield* Effect.all([
+            querySessionMetricsTotals(threadId).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getSessionMetrics:totals:query",
+                  "ProjectionSnapshotQuery.getSessionMetrics:totals:decode",
+                ),
+              ),
+            ),
+            querySessionMetricsLatestTurn(threadId).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getSessionMetrics:latestTurn:query",
+                  "ProjectionSnapshotQuery.getSessionMetrics:latestTurn:decode",
+                ),
+              ),
+            ),
+          ]);
+
+          const totals = totalsOption._tag === "Some"
+            ? totalsOption.value
+            : { turnCount: 0, totalInputTokens: 0, totalOutputTokens: 0, totalCostUsd: 0 };
+
+          const latestTurn = latestTurnOption._tag === "Some" ? latestTurnOption.value : null;
+
+          const contextUsedTokens =
+            latestTurn !== null &&
+            latestTurn.inputTokens !== null &&
+            latestTurn.outputTokens !== null
+              ? latestTurn.inputTokens +
+                latestTurn.outputTokens +
+                (latestTurn.cacheReadTokens ?? 0) +
+                (latestTurn.cacheWriteTokens ?? 0)
+              : null;
+
+          // contextWindowSize is not stored in DB — caller/client is responsible for providing it
+          const contextWindowSize = null;
+          const contextUsagePercent =
+            contextUsedTokens !== null && contextWindowSize !== null && contextWindowSize > 0
+              ? (contextUsedTokens / contextWindowSize) * 100
+              : null;
+
+          const metrics: OrchestrationSessionMetrics = {
+            turnCount: Math.max(0, Math.trunc(totals.turnCount)) as OrchestrationSessionMetrics["turnCount"],
+            totalInputTokens: Math.max(0, Math.trunc(totals.totalInputTokens)) as OrchestrationSessionMetrics["totalInputTokens"],
+            totalOutputTokens: Math.max(0, Math.trunc(totals.totalOutputTokens)) as OrchestrationSessionMetrics["totalOutputTokens"],
+            totalCostUsd: totals.totalCostUsd,
+            contextUsedTokens: contextUsedTokens as OrchestrationSessionMetrics["contextUsedTokens"],
+            contextWindowSize,
+            contextUsagePercent,
+            rateLimits: [],
+          };
+
+          return metrics;
+        }),
+      )
+      .pipe(
+        Effect.mapError((error) => {
+          if (isPersistenceError(error)) {
+            return error;
+          }
+          return toPersistenceSqlError("ProjectionSnapshotQuery.getSessionMetrics:query")(error);
+        }),
+      );
+
   return {
     getSnapshot,
+    getSessionMetrics,
   } satisfies ProjectionSnapshotQueryShape;
 });
 

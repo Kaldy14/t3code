@@ -122,6 +122,7 @@ describe("CheckpointDiffQueryLive", () => {
       Layer.provideMerge(
         Layer.succeed(ProjectionSnapshotQuery, {
           getSnapshot: () => Effect.succeed(snapshot),
+          getSessionMetrics: () => Effect.die("not implemented"),
         }),
       ),
     );
@@ -177,6 +178,7 @@ describe("CheckpointDiffQueryLive", () => {
               threads: [],
               updatedAt: "2026-01-01T00:00:00.000Z",
             } satisfies OrchestrationReadModel),
+          getSessionMetrics: () => Effect.die("not implemented"),
         }),
       ),
     );

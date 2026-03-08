@@ -35,10 +35,13 @@ import type {
   ClientOrchestrationCommand,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
+  OrchestrationGetSessionMetricsInput,
+  OrchestrationGetSessionMetricsResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationEvent,
   OrchestrationReadModel,
+  OrchestrationGetSlashCommandsInput,
 } from "./orchestration";
 import { EditorId } from "./editor";
 
@@ -146,6 +149,12 @@ export interface NativeApi {
       input: OrchestrationGetFullThreadDiffInput,
     ) => Promise<OrchestrationGetFullThreadDiffResult>;
     replayEvents: (fromSequenceExclusive: number) => Promise<OrchestrationEvent[]>;
+    getSessionMetrics: (
+      input: OrchestrationGetSessionMetricsInput,
+    ) => Promise<OrchestrationGetSessionMetricsResult>;
+    getSlashCommands: (
+      input: OrchestrationGetSlashCommandsInput,
+    ) => Promise<{ commands: ReadonlyArray<string> }>;
     onDomainEvent: (callback: (event: OrchestrationEvent) => void) => () => void;
   };
 }

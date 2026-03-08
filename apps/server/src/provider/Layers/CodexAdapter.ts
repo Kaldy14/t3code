@@ -1445,6 +1445,9 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
     const hasSession: CodexAdapterShape["hasSession"] = (threadId) =>
       Effect.sync(() => manager.hasSession(threadId));
 
+    const getSlashCommands: CodexAdapterShape["getSlashCommands"] = (_threadId) =>
+      Effect.succeed([]);
+
     const stopAll: CodexAdapterShape["stopAll"] = () =>
       Effect.sync(() => {
         manager.stopAll();
@@ -1505,6 +1508,7 @@ const makeCodexAdapter = (options?: CodexAdapterLiveOptions) =>
       stopSession,
       listSessions,
       hasSession,
+      getSlashCommands,
       stopAll,
       streamEvents: Stream.fromQueue(runtimeEventQueue),
     } satisfies CodexAdapterShape;

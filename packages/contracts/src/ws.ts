@@ -8,6 +8,8 @@ import {
   OrchestrationGetSnapshotInput,
   OrchestrationGetTurnDiffInput,
   OrchestrationReplayEventsInput,
+  OrchestrationGetSessionMetricsInput,
+  OrchestrationGetSlashCommandsInput,
 } from "./orchestration";
 import {
   GitCheckoutInput,
@@ -99,6 +101,8 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(ORCHESTRATION_WS_METHODS.getTurnDiff, OrchestrationGetTurnDiffInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.getFullThreadDiff, OrchestrationGetFullThreadDiffInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.replayEvents, OrchestrationReplayEventsInput),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.getSessionMetrics, OrchestrationGetSessionMetricsInput),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.getSlashCommands, OrchestrationGetSlashCommandsInput),
 
   // Project Search
   tagRequestBody(WS_METHODS.projectsSearchEntries, ProjectSearchEntriesInput),

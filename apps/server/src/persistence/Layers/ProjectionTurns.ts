@@ -55,7 +55,13 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           checkpoint_turn_count,
           checkpoint_ref,
           checkpoint_status,
-          checkpoint_files_json
+          checkpoint_files_json,
+          input_tokens,
+          output_tokens,
+          cache_read_tokens,
+          cache_write_tokens,
+          total_cost_usd,
+          model
         )
         VALUES (
           ${row.threadId},
@@ -69,7 +75,13 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           ${row.checkpointTurnCount},
           ${row.checkpointRef},
           ${row.checkpointStatus},
-          ${row.checkpointFiles}
+          ${row.checkpointFiles},
+          ${row.inputTokens},
+          ${row.outputTokens},
+          ${row.cacheReadTokens},
+          ${row.cacheWriteTokens},
+          ${row.totalCostUsd},
+          ${row.model}
         )
         ON CONFLICT (thread_id, turn_id)
         DO UPDATE SET
@@ -82,7 +94,13 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           checkpoint_turn_count = excluded.checkpoint_turn_count,
           checkpoint_ref = excluded.checkpoint_ref,
           checkpoint_status = excluded.checkpoint_status,
-          checkpoint_files_json = excluded.checkpoint_files_json
+          checkpoint_files_json = excluded.checkpoint_files_json,
+          input_tokens = excluded.input_tokens,
+          output_tokens = excluded.output_tokens,
+          cache_read_tokens = excluded.cache_read_tokens,
+          cache_write_tokens = excluded.cache_write_tokens,
+          total_cost_usd = excluded.total_cost_usd,
+          model = excluded.model
       `,
   });
 
@@ -170,7 +188,13 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           checkpoint_turn_count AS "checkpointTurnCount",
           checkpoint_ref AS "checkpointRef",
           checkpoint_status AS "checkpointStatus",
-          checkpoint_files_json AS "checkpointFiles"
+          checkpoint_files_json AS "checkpointFiles",
+          input_tokens AS "inputTokens",
+          output_tokens AS "outputTokens",
+          cache_read_tokens AS "cacheReadTokens",
+          cache_write_tokens AS "cacheWriteTokens",
+          total_cost_usd AS "totalCostUsd",
+          model
         FROM projection_turns
         WHERE thread_id = ${threadId}
         ORDER BY
@@ -201,7 +225,13 @@ const makeProjectionTurnRepository = Effect.gen(function* () {
           checkpoint_turn_count AS "checkpointTurnCount",
           checkpoint_ref AS "checkpointRef",
           checkpoint_status AS "checkpointStatus",
-          checkpoint_files_json AS "checkpointFiles"
+          checkpoint_files_json AS "checkpointFiles",
+          input_tokens AS "inputTokens",
+          output_tokens AS "outputTokens",
+          cache_read_tokens AS "cacheReadTokens",
+          cache_write_tokens AS "cacheWriteTokens",
+          total_cost_usd AS "totalCostUsd",
+          model
         FROM projection_turns
         WHERE thread_id = ${threadId}
           AND turn_id = ${turnId}

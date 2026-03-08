@@ -43,6 +43,12 @@ export const ProjectionTurn = Schema.Struct({
   checkpointRef: Schema.NullOr(CheckpointRef),
   checkpointStatus: Schema.NullOr(OrchestrationCheckpointStatus),
   checkpointFiles: Schema.Array(OrchestrationCheckpointFile),
+  inputTokens: Schema.NullOr(Schema.Int),
+  outputTokens: Schema.NullOr(Schema.Int),
+  cacheReadTokens: Schema.NullOr(Schema.Int),
+  cacheWriteTokens: Schema.NullOr(Schema.Int),
+  totalCostUsd: Schema.NullOr(Schema.Number),
+  model: Schema.NullOr(Schema.String),
 });
 export type ProjectionTurn = typeof ProjectionTurn.Type;
 
@@ -59,6 +65,12 @@ export const ProjectionTurnById = Schema.Struct({
   checkpointRef: Schema.NullOr(CheckpointRef),
   checkpointStatus: Schema.NullOr(OrchestrationCheckpointStatus),
   checkpointFiles: Schema.Array(OrchestrationCheckpointFile),
+  inputTokens: Schema.NullOr(Schema.Int),
+  outputTokens: Schema.NullOr(Schema.Int),
+  cacheReadTokens: Schema.NullOr(Schema.Int),
+  cacheWriteTokens: Schema.NullOr(Schema.Int),
+  totalCostUsd: Schema.NullOr(Schema.Number),
+  model: Schema.NullOr(Schema.String),
 });
 export type ProjectionTurnById = typeof ProjectionTurnById.Type;
 

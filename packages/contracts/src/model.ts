@@ -99,7 +99,7 @@ export type CursorModelSlug = (typeof MODEL_OPTIONS_BY_PROVIDER)["cursor"][numbe
 
 export const DEFAULT_MODEL_BY_PROVIDER = {
   codex: "gpt-5.4",
-  claudeCode: "claude-sonnet-4-6",
+  claudeCode: "claude-opus-4-6",
   cursor: "opus-4.6-thinking",
 } as const satisfies Record<ProviderKind, ModelSlug>;
 

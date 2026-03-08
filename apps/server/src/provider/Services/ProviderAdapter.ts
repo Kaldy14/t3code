@@ -105,6 +105,11 @@ export interface ProviderAdapterShape<TError> {
   readonly hasSession: (threadId: ThreadId) => Effect.Effect<boolean>;
 
   /**
+   * Get the available slash commands for a session.
+   */
+  readonly getSlashCommands?: (threadId: ThreadId) => Effect.Effect<ReadonlyArray<string>>;
+
+  /**
    * Read a provider thread snapshot.
    */
   readonly readThread: (

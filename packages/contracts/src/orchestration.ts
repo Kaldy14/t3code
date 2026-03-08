@@ -21,6 +21,8 @@ export const ORCHESTRATION_WS_METHODS = {
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   replayEvents: "orchestration.replayEvents",
+  getSessionMetrics: "orchestration.getSessionMetrics",
+  getSlashCommands: "orchestration.getSlashCommands",
 } as const;
 
 export const ORCHESTRATION_WS_CHANNELS = {
@@ -224,6 +226,8 @@ export const OrchestrationThreadActivity = Schema.Struct({
   turnId: Schema.NullOr(TurnId),
   sequence: Schema.optional(NonNegativeInt),
   createdAt: IsoDateTime,
+  taskId: Schema.optional(TrimmedNonEmptyString),
+  parentToolUseId: Schema.optional(TrimmedNonEmptyString),
 });
 export type OrchestrationThreadActivity = typeof OrchestrationThreadActivity.Type;
 
@@ -242,8 +246,38 @@ export const OrchestrationLatestTurn = Schema.Struct({
   startedAt: Schema.NullOr(IsoDateTime),
   completedAt: Schema.NullOr(IsoDateTime),
   assistantMessageId: Schema.NullOr(MessageId),
+  inputTokens: Schema.optional(Schema.NullOr(Schema.Int)),
+  outputTokens: Schema.optional(Schema.NullOr(Schema.Int)),
+  cacheReadTokens: Schema.optional(Schema.NullOr(Schema.Int)),
+  cacheWriteTokens: Schema.optional(Schema.NullOr(Schema.Int)),
+  totalCostUsd: Schema.optional(Schema.NullOr(Schema.Number)),
+  model: Schema.optional(Schema.NullOr(Schema.String)),
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
+
+export const RateLimitEntry = Schema.Struct({
+  rateLimitType: Schema.String,
+  status: Schema.String,
+  utilization: Schema.Number,
+  resetsAt: Schema.NullOr(Schema.Number),
+  isUsingOverage: Schema.optional(Schema.Boolean),
+});
+export type RateLimitEntry = typeof RateLimitEntry.Type;
+
+export const OrchestrationSessionMetrics = Schema.Struct({
+  // Cumulative totals across all completed turns
+  turnCount: NonNegativeInt,
+  totalInputTokens: NonNegativeInt,
+  totalOutputTokens: NonNegativeInt,
+  totalCostUsd: Schema.Number,
+  // Context window status from latest completed turn (point-in-time)
+  contextUsedTokens: Schema.NullOr(NonNegativeInt),
+  contextWindowSize: Schema.NullOr(NonNegativeInt),
+  contextUsagePercent: Schema.NullOr(Schema.Number),
+  // Rate limits (ephemeral, from latest rate_limit_event)
+  rateLimits: Schema.Array(RateLimitEntry),
+});
+export type OrchestrationSessionMetrics = typeof OrchestrationSessionMetrics.Type;
 
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
@@ -537,6 +571,20 @@ const ThreadRevertCompleteCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+const ThreadTurnUsageUpdateCommand = Schema.Struct({
+  type: Schema.Literal("thread.turn.usage.update"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  turnId: TurnId,
+  inputTokens: Schema.NullOr(Schema.Int),
+  outputTokens: Schema.NullOr(Schema.Int),
+  cacheReadTokens: Schema.NullOr(Schema.Int),
+  cacheWriteTokens: Schema.NullOr(Schema.Int),
+  totalCostUsd: Schema.NullOr(Schema.Number),
+  model: Schema.NullOr(Schema.String),
+  createdAt: IsoDateTime,
+});
+
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
   ThreadMessageAssistantDeltaCommand,
@@ -545,6 +593,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
   ThreadRevertCompleteCommand,
+  ThreadTurnUsageUpdateCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
 
@@ -575,6 +624,7 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.proposed-plan-upserted",
   "thread.turn-diff-completed",
   "thread.activity-appended",
+  "thread.turn-usage-updated",
 ]);
 export type OrchestrationEventType = typeof OrchestrationEventType.Type;
 
@@ -738,6 +788,18 @@ export const ThreadActivityAppendedPayload = Schema.Struct({
   activity: OrchestrationThreadActivity,
 });
 
+export const ThreadTurnUsageUpdatedPayload = Schema.Struct({
+  threadId: ThreadId,
+  turnId: TurnId,
+  inputTokens: Schema.NullOr(Schema.Int),
+  outputTokens: Schema.NullOr(Schema.Int),
+  cacheReadTokens: Schema.NullOr(Schema.Int),
+  cacheWriteTokens: Schema.NullOr(Schema.Int),
+  totalCostUsd: Schema.NullOr(Schema.Number),
+  model: Schema.NullOr(Schema.String),
+});
+export type ThreadTurnUsageUpdatedPayload = typeof ThreadTurnUsageUpdatedPayload.Type;
+
 export const OrchestrationEventMetadata = Schema.Struct({
   providerTurnId: Schema.optional(TrimmedNonEmptyString),
   providerItemId: Schema.optional(ProviderItemId),
@@ -874,6 +936,11 @@ export const OrchestrationEvent = Schema.Union([
     type: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
   }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.turn-usage-updated"),
+    payload: ThreadTurnUsageUpdatedPayload,
+  }),
 ]);
 export type OrchestrationEvent = typeof OrchestrationEvent.Type;
 
@@ -978,6 +1045,11 @@ export const OrchestrationPersistedEvent = Schema.Union([
     eventType: Schema.Literal("thread.activity-appended"),
     payload: ThreadActivityAppendedPayload,
   }),
+  Schema.Struct({
+    ...PersistedEventBaseFields,
+    eventType: Schema.Literal("thread.turn-usage-updated"),
+    payload: ThreadTurnUsageUpdatedPayload,
+  }),
 ]);
 export type OrchestrationPersistedEvent = typeof OrchestrationPersistedEvent.Type;
 
@@ -1076,6 +1148,22 @@ export type OrchestrationReplayEventsInput = typeof OrchestrationReplayEventsInp
 const OrchestrationReplayEventsResult = Schema.Array(OrchestrationEvent);
 export type OrchestrationReplayEventsResult = typeof OrchestrationReplayEventsResult.Type;
 
+export const OrchestrationGetSessionMetricsInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type OrchestrationGetSessionMetricsInput =
+  typeof OrchestrationGetSessionMetricsInput.Type;
+
+export const OrchestrationGetSessionMetricsResult = OrchestrationSessionMetrics;
+export type OrchestrationGetSessionMetricsResult =
+  typeof OrchestrationGetSessionMetricsResult.Type;
+
+export const OrchestrationGetSlashCommandsInput = Schema.Struct({
+  threadId: ThreadId,
+});
+export type OrchestrationGetSlashCommandsInput =
+  typeof OrchestrationGetSlashCommandsInput.Type;
+
 export const OrchestrationRpcSchemas = {
   getSnapshot: {
     input: OrchestrationGetSnapshotInput,
@@ -1096,5 +1184,9 @@ export const OrchestrationRpcSchemas = {
   replayEvents: {
     input: OrchestrationReplayEventsInput,
     output: OrchestrationReplayEventsResult,
+  },
+  getSessionMetrics: {
+    input: OrchestrationGetSessionMetricsInput,
+    output: OrchestrationGetSessionMetricsResult,
   },
 } as const;

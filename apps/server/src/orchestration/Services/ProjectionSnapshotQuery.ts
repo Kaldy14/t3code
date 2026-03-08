@@ -6,7 +6,7 @@
  *
  * @module ProjectionSnapshotQuery
  */
-import type { OrchestrationReadModel } from "@t3tools/contracts";
+import type { OrchestrationReadModel, OrchestrationSessionMetrics, ThreadId } from "@t3tools/contracts";
 import { ServiceMap } from "effect";
 import type { Effect } from "effect";
 
@@ -23,6 +23,17 @@ export interface ProjectionSnapshotQueryShape {
    * projector cursor state.
    */
   readonly getSnapshot: () => Effect.Effect<OrchestrationReadModel, ProjectionRepositoryError>;
+
+  /**
+   * Return cumulative session metrics and context window status for a thread.
+   *
+   * Cumulative totals (turnCount, totalInputTokens, totalOutputTokens, totalCostUsd) are
+   * computed via SQL aggregation. Context window status (contextUsedTokens) derives from
+   * the latest completed turn's inputTokens + outputTokens.
+   */
+  readonly getSessionMetrics: (
+    threadId: ThreadId,
+  ) => Effect.Effect<OrchestrationSessionMetrics, ProjectionRepositoryError>;
 }
 
 /**

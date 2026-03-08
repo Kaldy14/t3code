@@ -610,6 +610,33 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
     }
 
+    case "thread.turn.usage.update": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      return {
+        ...withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        }),
+        type: "thread.turn-usage-updated",
+        payload: {
+          threadId: command.threadId,
+          turnId: command.turnId,
+          inputTokens: command.inputTokens,
+          outputTokens: command.outputTokens,
+          cacheReadTokens: command.cacheReadTokens,
+          cacheWriteTokens: command.cacheWriteTokens,
+          totalCostUsd: command.totalCostUsd,
+          model: command.model,
+        },
+      };
+    }
+
     default: {
       command satisfies never;
       const fallback = command as never as { type: string };

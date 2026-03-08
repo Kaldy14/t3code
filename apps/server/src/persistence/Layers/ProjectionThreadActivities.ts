@@ -43,7 +43,9 @@ const makeProjectionThreadActivityRepository = Effect.gen(function* () {
               summary,
               payload_json,
               sequence,
-              created_at
+              created_at,
+              task_id,
+              parent_tool_use_id
             )
             VALUES (
               ${row.activityId},
@@ -54,7 +56,9 @@ const makeProjectionThreadActivityRepository = Effect.gen(function* () {
               ${row.summary},
               ${JSON.stringify(row.payload)},
               ${row.sequence ?? null},
-              ${row.createdAt}
+              ${row.createdAt},
+              ${row.taskId ?? null},
+              ${row.parentToolUseId ?? null}
             )
             ON CONFLICT (activity_id)
             DO UPDATE SET
@@ -65,7 +69,9 @@ const makeProjectionThreadActivityRepository = Effect.gen(function* () {
               summary = excluded.summary,
               payload_json = excluded.payload_json,
               sequence = excluded.sequence,
-              created_at = excluded.created_at
+              created_at = excluded.created_at,
+              task_id = excluded.task_id,
+              parent_tool_use_id = excluded.parent_tool_use_id
           `,
   });
 
@@ -83,7 +89,9 @@ const makeProjectionThreadActivityRepository = Effect.gen(function* () {
           summary,
           payload_json AS "payload",
           sequence,
-          created_at AS "createdAt"
+          created_at AS "createdAt",
+          task_id AS "taskId",
+          parent_tool_use_id AS "parentToolUseId"
         FROM projection_thread_activities
         WHERE thread_id = ${threadId}
         ORDER BY
@@ -132,6 +140,8 @@ const makeProjectionThreadActivityRepository = Effect.gen(function* () {
           payload: row.payload,
           ...(row.sequence !== null ? { sequence: row.sequence } : {}),
           createdAt: row.createdAt,
+          ...(row.taskId ? { taskId: row.taskId } : {}),
+          ...(row.parentToolUseId ? { parentToolUseId: row.parentToolUseId } : {}),
         })),
       ),
     );

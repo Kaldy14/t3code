@@ -100,6 +100,13 @@ export interface ProviderServiceShape {
   }) => Effect.Effect<void, ProviderServiceError>;
 
   /**
+   * Get the available slash commands for a session.
+   */
+  readonly getSlashCommands?: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ReadonlyArray<string>, ProviderServiceError>;
+
+  /**
    * Stop all active provider sessions across all adapters.
    */
   readonly stopAll: () => Effect.Effect<void, ProviderServiceError>;

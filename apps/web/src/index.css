@@ -316,6 +316,7 @@ label:has(> select#reasoning-effort) select {
   padding: 0.1rem 0.35rem;
   color: var(--foreground);
   font-size: 0.75rem;
+  vertical-align: baseline;
 }
 
 .chat-markdown pre {

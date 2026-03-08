@@ -195,6 +195,10 @@ export function createWsNativeApi(): NativeApi {
         transport.request(ORCHESTRATION_WS_METHODS.getFullThreadDiff, input),
       replayEvents: (fromSequenceExclusive) =>
         transport.request(ORCHESTRATION_WS_METHODS.replayEvents, { fromSequenceExclusive }),
+      getSessionMetrics: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.getSessionMetrics, input),
+      getSlashCommands: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.getSlashCommands, input),
       onDomainEvent: (callback) =>
         transport.subscribe(ORCHESTRATION_WS_CHANNELS.domainEvent, (data) => {
           const payload = decodeAndWarnOnFailure(OrchestrationEvent, data);
