@@ -180,7 +180,7 @@ it.live("runs a single turn end-to-end and persists checkpoint state in sqlite +
         ],
       };
 
-      yield* harness.adapterHarness.queueTurnResponseForNextSession(turnResponse);
+      yield* harness.adapterHarness!.queueTurnResponseForNextSession(turnResponse);
       yield* startTurn({
         harness,
         commandId: "cmd-turn-start-single",
@@ -314,7 +314,7 @@ it.live("runs multi-turn file edits and persists checkpoint diffs", () =>
     Effect.gen(function* () {
       yield* seedProjectAndThread(harness);
 
-      yield* harness.adapterHarness.queueTurnResponseForNextSession({
+      yield* harness.adapterHarness!.queueTurnResponseForNextSession({
         events: [
           {
             type: "turn.started",
@@ -473,7 +473,7 @@ it.live("tracks approval requests and resolves pending approvals on user respons
     Effect.gen(function* () {
       yield* seedProjectAndThread(harness);
 
-      yield* harness.adapterHarness.queueTurnResponseForNextSession({
+      yield* harness.adapterHarness!.queueTurnResponseForNextSession({
         events: [
           {
             type: "turn.started",
@@ -554,7 +554,7 @@ it.live("records failed turn runtime state and checkpoint status as error", () =
     Effect.gen(function* () {
       yield* seedProjectAndThread(harness);
 
-      yield* harness.adapterHarness.queueTurnResponseForNextSession({
+      yield* harness.adapterHarness!.queueTurnResponseForNextSession({
         events: [
           {
             type: "turn.started",
@@ -633,7 +633,7 @@ it.live("reverts to an earlier checkpoint and trims checkpoint projections + git
     Effect.gen(function* () {
       yield* seedProjectAndThread(harness);
 
-      yield* harness.adapterHarness.queueTurnResponseForNextSession({
+      yield* harness.adapterHarness!.queueTurnResponseForNextSession({
         events: [
           {
             type: "turn.started",

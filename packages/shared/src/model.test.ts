@@ -8,7 +8,7 @@ import {
   MODEL_OPTIONS,
   MODEL_OPTIONS_BY_PROVIDER,
   REASONING_EFFORT_OPTIONS_BY_PROVIDER,
-} from "../../contracts/src";
+} from "@t3tools/contracts";
 
 import {
   getDefaultModel,
@@ -55,6 +55,11 @@ describe("normalizeModelSlug", () => {
     expect(normalizeModelSlug("claude-4.6-sonnet-thinking", "cursor")).toBe(
       "sonnet-4.6-thinking",
     );
+  });
+
+  it("does not leak prototype properties as aliases", () => {
+    expect(normalizeModelSlug("toString")).toBe("toString");
+    expect(normalizeModelSlug("constructor")).toBe("constructor");
   });
 });
 

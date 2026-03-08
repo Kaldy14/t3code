@@ -91,6 +91,8 @@ interface ToolInFlight {
 }
 
 interface ClaudeSessionContext {
+  /** Internal thread ID used as the sessions Map key (always `input.threadId`). */
+  readonly internalThreadId: ThreadId;
   session: ProviderSession;
   readonly promptQueue: Queue.Queue<PromptQueueItem>;
   readonly query: ClaudeQueryRuntime;
@@ -502,6 +504,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                 provider: PROVIDER,
                 createdAt: observedAt,
                 method: sdkNativeMethod(message),
+                ...(context.session.threadId ? { threadId: context.session.threadId } : {}),
                 ...(typeof message.session_id === "string"
                   ? { providerThreadId: message.session_id }
                   : {}),
@@ -570,6 +573,12 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         }
         const nextThreadId = message.session_id;
         context.resumeSessionId = message.session_id;
+        if (!context.session.threadId) {
+          context.session = {
+            ...context.session,
+            threadId: ThreadId.makeUnsafe(nextThreadId),
+          };
+        }
         yield* updateResumeCursor(context);
 
         if (context.lastThreadStartedId !== nextThreadId) {
@@ -1353,18 +1362,44 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           });
         }
 
-        sessions.delete(context.session.threadId);
+        sessions.delete(context.internalThreadId);
       });
 
+    const findSession = (
+      threadId: ThreadId | undefined,
+    ): ClaudeSessionContext | undefined => {
+      if (threadId !== undefined) {
+        const direct = sessions.get(threadId);
+        if (direct) return direct;
+      }
+      for (const ctx of sessions.values()) {
+        if (
+          ctx.internalThreadId === threadId ||
+          ctx.session.threadId === threadId
+        ) {
+          return ctx;
+        }
+      }
+      // When threadId is undefined, return the sole active session if exactly
+      // one exists. This handles the case where the caller obtained a session
+      // whose provider threadId was not yet assigned.
+      if (threadId === undefined && sessions.size === 1) {
+        const [only] = sessions.values();
+        return only;
+      }
+      return undefined;
+    };
+
     const requireSession = (
-      threadId: ThreadId,
+      threadId: ThreadId | undefined,
     ): Effect.Effect<ClaudeSessionContext, ProviderAdapterError> => {
-      const context = sessions.get(threadId);
+      const context = findSession(threadId);
+      const errorThreadId = threadId ?? ThreadId.makeUnsafe("<unknown>");
       if (!context) {
         return Effect.fail(
           new ProviderAdapterSessionNotFoundError({
             provider: PROVIDER,
-            threadId,
+            threadId: errorThreadId,
           }),
         );
       }
@@ -1372,7 +1407,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         return Effect.fail(
           new ProviderAdapterSessionClosedError({
             provider: PROVIDER,
-            threadId,
+            threadId: errorThreadId,
           }),
         );
       }
@@ -1391,7 +1426,9 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
 
         const startedAt = yield* nowIso;
         const resumeState = readClaudeResumeState(input.resumeCursor);
-        const threadId = input.threadId;
+        const internalThreadId = input.threadId;
+        const providerThreadId = resumeState?.threadId ?? undefined;
+        const threadId = internalThreadId;
 
         const promptQueue = yield* Queue.unbounded<PromptQueueItem>();
         const prompt = yield* Stream.fromQueue(promptQueue).pipe(
@@ -1580,15 +1617,14 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         });
 
         const session: ProviderSession = {
-          threadId,
+          threadId: providerThreadId,
           provider: PROVIDER,
           status: "ready",
           runtimeMode: input.runtimeMode,
           ...(input.cwd ? { cwd: input.cwd } : {}),
           ...(input.model ? { model: input.model } : {}),
-          ...(threadId ? { threadId } : {}),
           resumeCursor: {
-            ...(threadId ? { threadId } : {}),
+            ...(providerThreadId ? { threadId: providerThreadId } : {}),
             ...(resumeState?.resume ? { resume: resumeState.resume } : {}),
             ...(resumeState?.resumeSessionAt
               ? { resumeSessionAt: resumeState.resumeSessionAt }
@@ -1600,6 +1636,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         };
 
         const context: ClaudeSessionContext = {
+          internalThreadId,
           session,
           promptQueue,
           query: queryRuntime,
@@ -1622,7 +1659,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           eventId: sessionStartedStamp.eventId,
           provider: PROVIDER,
           createdAt: sessionStartedStamp.createdAt,
-          threadId,
+          ...(providerThreadId ? { threadId: providerThreadId } : {}),
           payload: input.resumeCursor !== undefined ? { resume: input.resumeCursor } : {},
           providerRefs: {},
         });
@@ -1633,7 +1670,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           eventId: configuredStamp.eventId,
           provider: PROVIDER,
           createdAt: configuredStamp.createdAt,
-          threadId,
+          ...(providerThreadId ? { threadId: providerThreadId } : {}),
           payload: {
             config: {
               ...(input.model ? { model: input.model } : {}),
@@ -1653,7 +1690,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           eventId: readyStamp.eventId,
           provider: PROVIDER,
           createdAt: readyStamp.createdAt,
-          threadId,
+          ...(providerThreadId ? { threadId: providerThreadId } : {}),
           payload: {
             state: "ready",
           },
@@ -1804,7 +1841,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
 
     const hasSession: ClaudeCodeAdapterShape["hasSession"] = (threadId) =>
       Effect.sync(() => {
-        const context = sessions.get(threadId);
+        const context = findSession(threadId);
         return context !== undefined && !context.stopped;
       });
 

@@ -10,7 +10,7 @@ import {
 
 import type { ChatMessage, ProposedPlan, SessionPhase, ThreadSession, TurnDiffSummary } from "./types";
 
-export type ProviderPickerKind = ProviderKind | "claudeCode";
+export type ProviderPickerKind = ProviderKind | "claudeCode" | "cursor";
 
 export const PROVIDER_OPTIONS: Array<{
   value: ProviderPickerKind;
@@ -394,6 +394,7 @@ export function deriveWorkLogEntries(
   return ordered
     .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
     .filter((activity) => activity.kind !== "tool.started")
+    .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")
     .filter((activity) => activity.summary !== "Checkpoint captured")
     .map((activity) => {
       const payload =

@@ -13,7 +13,7 @@ import {
   type CursorReasoningOption,
   type ModelSlug,
   type ProviderKind,
-} from "../../contracts/src";
+} from "@t3tools/contracts";
 
 type CursorModelCapability = {
   readonly supportsReasoning: boolean;
@@ -89,7 +89,9 @@ const CURSOR_MODEL_CAPABILITY_BY_FAMILY: Record<CursorModelFamily, CursorModelCa
   },
 };
 
-const MODEL_SLUG_SET_BY_PROVIDER: Record<ProviderKind, ReadonlySet<ModelSlug>> = {
+type CatalogProvider = keyof typeof MODEL_OPTIONS_BY_PROVIDER;
+
+const MODEL_SLUG_SET_BY_PROVIDER: Record<CatalogProvider, ReadonlySet<ModelSlug>> = {
   claudeCode: new Set(MODEL_OPTIONS_BY_PROVIDER.claudeCode.map((option) => option.slug)),
   codex: new Set(MODEL_OPTIONS_BY_PROVIDER.codex.map((option) => option.slug)),
   cursor: new Set(MODEL_OPTIONS_BY_PROVIDER.cursor.map((option) => option.slug)),
@@ -239,7 +241,9 @@ export function normalizeModelSlug(
     return null;
   }
 
-  return MODEL_SLUG_ALIASES_BY_PROVIDER[provider][trimmed] ?? (trimmed as ModelSlug);
+  const aliases = MODEL_SLUG_ALIASES_BY_PROVIDER[provider] as Record<string, ModelSlug>;
+  const aliased = aliases[trimmed];
+  return typeof aliased === "string" ? aliased : (trimmed as ModelSlug);
 }
 
 export function resolveModelSlug(
@@ -248,12 +252,12 @@ export function resolveModelSlug(
 ): ModelSlug {
   const normalized = normalizeModelSlug(model, provider);
   if (!normalized) {
-    return DEFAULT_MODEL_BY_PROVIDER[provider];
+    return getDefaultModel(provider);
   }
 
   return MODEL_SLUG_SET_BY_PROVIDER[provider].has(normalized)
     ? normalized
-    : DEFAULT_MODEL_BY_PROVIDER[provider];
+    : getDefaultModel(provider);
 }
 
 export function resolveModelSlugForProvider(

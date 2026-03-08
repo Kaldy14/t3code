@@ -190,7 +190,6 @@ describe("ProviderCommandReactor", () => {
           sessionModelSwitch: provider === "cursor" ? "unsupported" : "in-session",
         }),
       rollbackConversation: () => unsupported(),
-      stopAll: () => Effect.void,
       streamEvents: Stream.fromPubSub(runtimeEventPubSub),
     };
 
@@ -508,6 +507,16 @@ describe("ProviderCommandReactor", () => {
   it("reuses the same cursor session when requested model is unchanged", async () => {
     const harness = await createHarness();
     const now = new Date().toISOString();
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.runtime-mode.set",
+        commandId: CommandId.makeUnsafe("cmd-runtime-mode-set-initial-full-access"),
+        threadId: ThreadId.makeUnsafe("thread-1"),
+        runtimeMode: "full-access",
+        createdAt: now,
+      }),
+    );
 
     await Effect.runPromise(
       harness.engine.dispatch({

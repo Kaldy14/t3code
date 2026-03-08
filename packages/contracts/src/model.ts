@@ -91,22 +91,23 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
     { slug: "gemini-3.1-pro", name: "Gemini 3.1 Pro" },
   ],
 } as const satisfies Record<ProviderKind, readonly ModelOption[]>;
+export type ModelOptionsByProvider = typeof MODEL_OPTIONS_BY_PROVIDER;
 
-type BuiltInModelSlug = (typeof MODEL_OPTIONS_BY_PROVIDER)[ProviderKind][number]["slug"];
+type BuiltInModelSlug = ModelOptionsByProvider[ProviderKind][number]["slug"];
 export type ModelSlug = BuiltInModelSlug | (string & {});
 export type CursorModelSlug = (typeof MODEL_OPTIONS_BY_PROVIDER)["cursor"][number]["slug"];
 
-export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderKind, ModelSlug> = {
-  codex: "gpt-5.3-codex",
+export const DEFAULT_MODEL_BY_PROVIDER = {
+  codex: "gpt-5.4",
   claudeCode: "claude-sonnet-4-6",
   cursor: "opus-4.6-thinking",
-};
+} as const satisfies Record<ProviderKind, ModelSlug>;
 
 // Backward compatibility for existing Codex-only call sites.
 export const MODEL_OPTIONS = MODEL_OPTIONS_BY_PROVIDER.codex;
 export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
 
-export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string, ModelSlug>> = {
+export const MODEL_SLUG_ALIASES_BY_PROVIDER = {
   codex: {
     "5.4": "gpt-5.4",
     "5.3": "gpt-5.3-codex",
@@ -142,7 +143,7 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
     "opus-4.6-thinking": "opus-4.6-thinking",
     "opus-4.5-thinking": "opus-4.5-thinking",
   },
-};
+} as const satisfies Record<ProviderKind, Record<string, ModelSlug>>;
 
 export const REASONING_EFFORT_OPTIONS_BY_PROVIDER = {
   codex: CODEX_REASONING_EFFORT_OPTIONS,

@@ -100,12 +100,7 @@ export interface ProviderServiceShape {
   }) => Effect.Effect<void, ProviderServiceError>;
 
   /**
-   * Stop all active provider sessions.
-   *
-   * Persisted session bindings remain so stale sessions can be resumed after
-   * process restart.
-   *
-   * Runtime alias mappings are cleared as part of shutdown.
+   * Stop all active provider sessions across all adapters.
    */
   readonly stopAll: () => Effect.Effect<void, ProviderServiceError>;
 

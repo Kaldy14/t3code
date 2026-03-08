@@ -1,11 +1,10 @@
 import { Schema } from "effect";
-import { TrimmedNonEmptyString } from "./baseSchemas";
+import { NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas";
 import { ProviderModelOptions } from "./model";
 import {
   ApprovalRequestId,
   EventId,
   IsoDateTime,
-  NonNegativeInt,
   ProviderItemId,
   ThreadId,
   TurnId,
@@ -15,9 +14,12 @@ import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_INPUT_CHARS,
   ProviderApprovalDecision,
+  ProviderApprovalPolicy,
   ProviderInteractionMode,
   ProviderKind,
   ProviderRequestKind,
+  ProviderSandboxMode,
+  ProviderServiceTier,
   ProviderUserInputAnswers,
   RuntimeMode,
 } from "./orchestration";
@@ -37,7 +39,7 @@ export const ProviderSession = Schema.Struct({
   runtimeMode: RuntimeMode,
   cwd: Schema.optional(TrimmedNonEmptyStringSchema),
   model: Schema.optional(TrimmedNonEmptyStringSchema),
-  threadId: ThreadId,
+  threadId: Schema.optional(ThreadId),
   resumeCursor: Schema.optional(Schema.Unknown),
   activeTurnId: Schema.optional(TurnId),
   createdAt: IsoDateTime,
@@ -74,6 +76,9 @@ export const ProviderSessionStartInput = Schema.Struct({
   model: Schema.optional(TrimmedNonEmptyStringSchema),
   modelOptions: Schema.optional(ProviderModelOptions),
   resumeCursor: Schema.optional(Schema.Unknown),
+  serviceTier: Schema.optional(Schema.NullOr(ProviderServiceTier)),
+  approvalPolicy: Schema.optional(ProviderApprovalPolicy),
+  sandboxMode: Schema.optional(ProviderSandboxMode),
   providerOptions: Schema.optional(ProviderStartOptions),
   runtimeMode: RuntimeMode,
 });
@@ -88,13 +93,14 @@ export const ProviderSendTurnInput = Schema.Struct({
     Schema.Array(ChatAttachment).check(Schema.isMaxLength(PROVIDER_SEND_TURN_MAX_ATTACHMENTS)),
   ),
   model: Schema.optional(TrimmedNonEmptyStringSchema),
+  serviceTier: Schema.optional(Schema.NullOr(ProviderServiceTier)),
   modelOptions: Schema.optional(ProviderModelOptions),
   interactionMode: Schema.optional(ProviderInteractionMode),
 });
 export type ProviderSendTurnInput = typeof ProviderSendTurnInput.Type;
 
 export const ProviderTurnStartResult = Schema.Struct({
-  threadId: ThreadId,
+  threadId: Schema.optional(ThreadId),
   turnId: TurnId,
   resumeCursor: Schema.optional(Schema.Unknown),
 });
