@@ -23,6 +23,7 @@ export const ORCHESTRATION_WS_METHODS = {
   replayEvents: "orchestration.replayEvents",
   getSessionMetrics: "orchestration.getSessionMetrics",
   getSlashCommands: "orchestration.getSlashCommands",
+  getCachedSlashCommands: "orchestration.getCachedSlashCommands",
 } as const;
 
 export const ORCHESTRATION_WS_CHANNELS = {
@@ -1163,6 +1164,12 @@ export const OrchestrationGetSlashCommandsInput = Schema.Struct({
 });
 export type OrchestrationGetSlashCommandsInput =
   typeof OrchestrationGetSlashCommandsInput.Type;
+
+export const OrchestrationGetCachedSlashCommandsInput = Schema.Struct({
+  providerKind: ProviderKind,
+});
+export type OrchestrationGetCachedSlashCommandsInput =
+  typeof OrchestrationGetCachedSlashCommandsInput.Type;
 
 export const OrchestrationRpcSchemas = {
   getSnapshot: {

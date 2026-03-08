@@ -107,6 +107,13 @@ export interface ProviderServiceShape {
   ) => Effect.Effect<ReadonlyArray<string>, ProviderServiceError>;
 
   /**
+   * Get cached slash commands for a provider kind (no active session needed).
+   */
+  readonly getCachedSlashCommands?: (
+    providerKind: ProviderKind,
+  ) => Effect.Effect<ReadonlyArray<string>, ProviderServiceError>;
+
+  /**
    * Stop all active provider sessions across all adapters.
    */
   readonly stopAll: () => Effect.Effect<void, ProviderServiceError>;

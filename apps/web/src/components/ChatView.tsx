@@ -1454,7 +1454,19 @@ export default function ChatView({ threadId }: ChatViewProps) {
     enabled: Boolean(activeThreadId) && hasActiveSession,
     staleTime: 60_000,
   });
-  const providerSlashCommands = slashCommandsQuery.data?.commands ?? EMPTY_SLASH_COMMANDS;
+  const cachedSlashCommandsQuery = useQuery({
+    queryKey: ["cachedSlashCommands", selectedProvider],
+    queryFn: async () => {
+      const api = readNativeApi();
+      if (!api) return { commands: [] as readonly string[] };
+      return api.orchestration.getCachedSlashCommands({ providerKind: selectedProvider });
+    },
+    enabled: !hasActiveSession,
+    staleTime: 120_000,
+  });
+  const providerSlashCommands = (hasActiveSession
+    ? slashCommandsQuery.data?.commands
+    : cachedSlashCommandsQuery.data?.commands) ?? EMPTY_SLASH_COMMANDS;
   const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
     if (!composerTrigger) return [];
     if (composerTrigger.kind === "path") {

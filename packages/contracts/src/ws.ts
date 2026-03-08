@@ -10,6 +10,7 @@ import {
   OrchestrationReplayEventsInput,
   OrchestrationGetSessionMetricsInput,
   OrchestrationGetSlashCommandsInput,
+  OrchestrationGetCachedSlashCommandsInput,
 } from "./orchestration";
 import {
   GitCheckoutInput,
@@ -103,6 +104,7 @@ const WebSocketRequestBody = Schema.Union([
   tagRequestBody(ORCHESTRATION_WS_METHODS.replayEvents, OrchestrationReplayEventsInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.getSessionMetrics, OrchestrationGetSessionMetricsInput),
   tagRequestBody(ORCHESTRATION_WS_METHODS.getSlashCommands, OrchestrationGetSlashCommandsInput),
+  tagRequestBody(ORCHESTRATION_WS_METHODS.getCachedSlashCommands, OrchestrationGetCachedSlashCommandsInput),
 
   // Project Search
   tagRequestBody(WS_METHODS.projectsSearchEntries, ProjectSearchEntriesInput),

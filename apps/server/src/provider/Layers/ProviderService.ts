@@ -462,6 +462,15 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         return yield* routed.adapter.getSlashCommands(threadId);
       });
 
+    const getCachedSlashCommands: ProviderServiceShape["getCachedSlashCommands"] = (providerKind) =>
+      Effect.gen(function* () {
+        const adapter = yield* registry.getByProvider(providerKind);
+        if (adapter.getCachedSlashCommands === undefined) {
+          return [];
+        }
+        return yield* adapter.getCachedSlashCommands();
+      });
+
     const rollbackConversation: ProviderServiceShape["rollbackConversation"] = (rawInput) =>
       Effect.gen(function* () {
         const input = yield* decodeInputOrValidationError({
@@ -526,6 +535,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       listSessions,
       getCapabilities,
       getSlashCommands,
+      getCachedSlashCommands,
       rollbackConversation,
       stopAll: runStopAll,
       streamEvents: Stream.fromPubSub(runtimeEventPubSub),

@@ -731,6 +731,14 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         return { commands };
       }
 
+      case ORCHESTRATION_WS_METHODS.getCachedSlashCommands: {
+        const { providerKind } = request.body;
+        const commands = liveProviderService.getCachedSlashCommands
+          ? yield* liveProviderService.getCachedSlashCommands(providerKind)
+          : [];
+        return { commands };
+      }
+
       case ORCHESTRATION_WS_METHODS.getSessionMetrics: {
         const { threadId } = request.body;
         const metrics = yield* projectionReadModelQuery.getSessionMetrics(threadId);

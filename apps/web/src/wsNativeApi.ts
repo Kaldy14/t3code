@@ -199,6 +199,8 @@ export function createWsNativeApi(): NativeApi {
         transport.request(ORCHESTRATION_WS_METHODS.getSessionMetrics, input),
       getSlashCommands: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.getSlashCommands, input),
+      getCachedSlashCommands: (input) =>
+        transport.request(ORCHESTRATION_WS_METHODS.getCachedSlashCommands, input),
       onDomainEvent: (callback) =>
         transport.subscribe(ORCHESTRATION_WS_CHANNELS.domainEvent, (data) => {
           const payload = decodeAndWarnOnFailure(OrchestrationEvent, data);

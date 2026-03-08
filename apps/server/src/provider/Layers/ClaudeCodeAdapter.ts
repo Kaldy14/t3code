@@ -471,6 +471,8 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
       }) => query({ prompt: input.prompt, options: input.options }) as ClaudeQueryRuntime);
 
     const sessions = new Map<ThreadId, ClaudeSessionContext>();
+    /** Provider-level cache of slash commands from the most recent session init. */
+    let cachedSlashCommands: string[] = [];
     const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
 
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -1032,7 +1034,9 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         switch (message.subtype) {
           case "init":
             if (Array.isArray((message as Record<string, unknown>).slash_commands)) {
-              context.availableSlashCommands = (message as Record<string, unknown>).slash_commands as string[];
+              const commands = (message as Record<string, unknown>).slash_commands as string[];
+              context.availableSlashCommands = commands;
+              cachedSlashCommands = commands;
             }
             yield* offerRuntimeEvent({
               ...base,
@@ -1862,6 +1866,9 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         return context?.availableSlashCommands ?? [];
       });
 
+    const getCachedSlashCommands: ClaudeCodeAdapterShape["getCachedSlashCommands"] = () =>
+      Effect.sync(() => cachedSlashCommands);
+
     const stopAll: ClaudeCodeAdapterShape["stopAll"] = () =>
       Effect.forEach(
         sessions,
@@ -1899,6 +1906,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
       listSessions,
       hasSession,
       getSlashCommands,
+      getCachedSlashCommands,
       stopAll,
       streamEvents: Stream.fromQueue(runtimeEventQueue),
     } satisfies ClaudeCodeAdapterShape;

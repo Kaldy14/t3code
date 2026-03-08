@@ -110,6 +110,11 @@ export interface ProviderAdapterShape<TError> {
   readonly getSlashCommands?: (threadId: ThreadId) => Effect.Effect<ReadonlyArray<string>>;
 
   /**
+   * Get cached slash commands from the most recent session (provider-level cache).
+   */
+  readonly getCachedSlashCommands?: () => Effect.Effect<ReadonlyArray<string>>;
+
+  /**
    * Read a provider thread snapshot.
    */
   readonly readThread: (
