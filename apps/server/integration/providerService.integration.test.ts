@@ -33,7 +33,7 @@ const makeWorkspaceDirectory = Effect.gen(function* () {
   const cwd = yield* fs.makeTempDirectory();
   yield* fs.writeFileString(pathService.join(cwd, "README.md"), "v1\n");
   return cwd;
-}).pipe(Effect.provide(NodeServices.layer)) as any;
+}).pipe(Effect.provide(NodeServices.layer));
 
 interface IntegrationFixture {
   readonly cwd: string;
@@ -133,7 +133,7 @@ it.effect("replays typed runtime fixture events", () =>
       const observedEvents = yield* runTurn({
         provider,
         harness: fixture.harness,
-        threadId: session.threadId,
+        threadId: session.threadId!,
         userText: "hello",
         response: { events: codexTurnTextFixture },
       });
@@ -143,7 +143,7 @@ it.effect("replays typed runtime fixture events", () =>
         codexTurnTextFixture.map((event) => event.type),
       );
     }).pipe(Effect.provide(fixture.layer));
-  }).pipe(Effect.provide(NodeServices.layer)) as any,
+  }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.effect("replays file-changing fixture turn events", () =>
@@ -168,7 +168,7 @@ it.effect("replays file-changing fixture turn events", () =>
       const observedEvents = yield* runTurn({
         provider,
         harness: fixture.harness,
-        threadId: session.threadId,
+        threadId: session.threadId!,
         userText: "make a small change",
         response: {
           events: codexTurnToolFixture,
@@ -182,7 +182,7 @@ it.effect("replays file-changing fixture turn events", () =>
         codexTurnToolFixture.map((event) => event.type),
       );
     }).pipe(Effect.provide(fixture.layer));
-  }).pipe(Effect.provide(NodeServices.layer)) as any,
+  }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.effect("runs multi-turn tool/approval flow", () =>
@@ -207,7 +207,7 @@ it.effect("runs multi-turn tool/approval flow", () =>
       const firstTurnEvents = yield* runTurn({
         provider,
         harness: fixture.harness,
-        threadId: session.threadId,
+        threadId: session.threadId!,
         userText: "turn 1",
         response: {
           events: codexTurnToolFixture,
@@ -223,7 +223,7 @@ it.effect("runs multi-turn tool/approval flow", () =>
       const secondTurnEvents = yield* runTurn({
         provider,
         harness: fixture.harness,
-        threadId: session.threadId,
+        threadId: session.threadId!,
         userText: "turn 2 approval",
         response: {
           events: codexTurnApprovalFixture,
@@ -236,7 +236,7 @@ it.effect("runs multi-turn tool/approval flow", () =>
         codexTurnApprovalFixture.map((event) => event.type),
       );
     }).pipe(Effect.provide(fixture.layer));
-  }).pipe(Effect.provide(NodeServices.layer)) as any,
+  }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.effect("rolls back provider conversation state only", () =>
@@ -261,7 +261,7 @@ it.effect("rolls back provider conversation state only", () =>
       yield* runTurn({
         provider,
         harness: fixture.harness,
-        threadId: session.threadId,
+        threadId: session.threadId!,
         userText: "turn 1",
         response: {
           events: codexTurnToolFixture,
@@ -273,7 +273,7 @@ it.effect("rolls back provider conversation state only", () =>
       yield* runTurn({
         provider,
         harness: fixture.harness,
-        threadId: session.threadId,
+        threadId: session.threadId!,
         userText: "turn 2 approval",
         response: {
           events: codexTurnApprovalFixture,
@@ -283,15 +283,15 @@ it.effect("rolls back provider conversation state only", () =>
       });
 
       yield* provider.rollbackConversation({
-        threadId: session.threadId,
+        threadId: session.threadId!,
         numTurns: 1,
       });
 
-      const rollbackCalls = fixture.harness.getRollbackCalls(session.threadId);
+      const rollbackCalls = fixture.harness.getRollbackCalls(session.threadId!);
       assert.deepEqual(rollbackCalls, [1]);
 
       const readme = yield* readFileString(join(fixture.cwd, "README.md"));
       assert.equal(readme, "v3\n");
     }).pipe(Effect.provide(fixture.layer));
-  }).pipe(Effect.provide(NodeServices.layer)) as any,
+  }).pipe(Effect.provide(NodeServices.layer)),
 );

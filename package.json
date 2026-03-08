@@ -60,6 +60,9 @@
     "bun": "^1.3.9",
     "node": "^24.13.1"
   },
+  "overrides": {
+    "effect": "https://pkg.pr.new/Effect-TS/effect-smol/effect@8881a9b"
+  },
   "packageManager": "bun@1.3.9",
   "msw": {
     "workerDirectory": [

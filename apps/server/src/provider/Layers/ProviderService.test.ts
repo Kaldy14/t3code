@@ -79,7 +79,7 @@ function makeFakeCodexAdapter(provider: ProviderKind = "codex") {
         createdAt: now,
         updatedAt: now,
       };
-      sessions.set(session.threadId, session);
+      sessions.set(session.threadId!, session);
       return session;
     }),
   );
@@ -362,7 +362,7 @@ it.effect(
 
       const persistedAfterStopAll = yield* Effect.gen(function* () {
         const repository = yield* ProviderSessionRuntimeRepository;
-        return yield* repository.getByThreadId({ threadId: startedSession.threadId });
+        return yield* repository.getByThreadId({ threadId: startedSession.threadId! });
       }).pipe(Effect.provide(runtimeRepositoryLayer));
       assert.equal(Option.isSome(persistedAfterStopAll), true);
       if (Option.isSome(persistedAfterStopAll)) {
@@ -393,7 +393,7 @@ it.effect(
       yield* Effect.gen(function* () {
         const provider = yield* ProviderService;
         yield* provider.rollbackConversation({
-          threadId: startedSession.threadId,
+          threadId: startedSession.threadId!,
           numTurns: 1,
         });
       }).pipe(Effect.provide(secondProviderLayer));
@@ -439,17 +439,17 @@ routing.layer("ProviderServiceLive routing", (it) => {
       assert.equal(sessions.length, 1);
 
       yield* provider.sendTurn({
-        threadId: session.threadId,
+        threadId: session.threadId!,
         input: "hello",
         attachments: [],
       });
       assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
 
-      yield* provider.interruptTurn({ threadId: session.threadId });
-      assert.deepEqual(routing.codex.interruptTurn.mock.calls, [[session.threadId, undefined]]);
+      yield* provider.interruptTurn({ threadId: session.threadId! });
+      assert.deepEqual(routing.codex.interruptTurn.mock.calls, [[session.threadId!, undefined]]);
 
       yield* provider.respondToRequest({
-        threadId: session.threadId,
+        threadId: session.threadId!,
         requestId: asRequestId("req-1"),
         decision: "accept",
       });
@@ -458,7 +458,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
       ]);
 
       yield* provider.respondToUserInput({
-        threadId: session.threadId,
+        threadId: session.threadId!,
         requestId: asRequestId("req-user-input-1"),
         answers: {
           sandbox_mode: "workspace-write",
@@ -466,7 +466,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
       });
       assert.deepEqual(routing.codex.respondToUserInput.mock.calls, [
         [
-          session.threadId,
+          session.threadId!,
           asRequestId("req-user-input-1"),
           {
             sandbox_mode: "workspace-write",
@@ -475,14 +475,14 @@ routing.layer("ProviderServiceLive routing", (it) => {
       ]);
 
       yield* provider.rollbackConversation({
-        threadId: session.threadId,
+        threadId: session.threadId!,
         numTurns: 0,
       });
 
-      yield* provider.stopSession({ threadId: session.threadId });
+      yield* provider.stopSession({ threadId: session.threadId! });
       const sendAfterStop = yield* Effect.result(
         provider.sendTurn({
-          threadId: session.threadId,
+          threadId: session.threadId!,
           input: "after-stop",
           attachments: [],
         }),
@@ -507,12 +507,12 @@ routing.layer("ProviderServiceLive routing", (it) => {
         cwd: "/tmp/project",
         runtimeMode: "full-access",
       });
-      yield* routing.codex.stopSession(initial.threadId);
+      yield* routing.codex.stopSession(initial.threadId!);
       routing.codex.startSession.mockClear();
       routing.codex.rollbackThread.mockClear();
 
       yield* provider.rollbackConversation({
-        threadId: initial.threadId,
+        threadId: initial.threadId!,
         numTurns: 1,
       });
 
@@ -576,7 +576,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
       routing.codex.sendTurn.mockClear();
 
       yield* provider.sendTurn({
-        threadId: initial.threadId,
+        threadId: initial.threadId!,
         input: "resume",
         attachments: [],
       });
@@ -634,13 +634,13 @@ routing.layer("ProviderServiceLive routing", (it) => {
         runtimeMode: "full-access",
       });
       yield* provider.sendTurn({
-        threadId: session.threadId,
+        threadId: session.threadId!,
         input: "hello",
         attachments: [],
       });
 
       const runningRuntime = yield* runtimeRepository.getByThreadId({
-        threadId: session.threadId,
+        threadId: session.threadId!,
       });
       assert.equal(Option.isSome(runningRuntime), true);
       if (Option.isSome(runningRuntime)) {
@@ -690,7 +690,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         eventId: asEventId("evt-1"),
         provider: "codex",
         createdAt: new Date().toISOString(),
-        threadId: session.threadId,
+        threadId: session.threadId!,
         turnId: asTurnId("turn-1"),
         status: "completed",
       };
@@ -729,7 +729,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         eventId: asEventId("evt-seq-1"),
         provider: "codex",
         createdAt: new Date().toISOString(),
-        threadId: session.threadId,
+        threadId: session.threadId!,
         turnId: asTurnId("turn-1"),
         toolKind: "command",
         title: "Command run",
@@ -739,7 +739,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         eventId: asEventId("evt-seq-2"),
         provider: "codex",
         createdAt: new Date().toISOString(),
-        threadId: session.threadId,
+        threadId: session.threadId!,
         turnId: asTurnId("turn-1"),
         toolKind: "command",
         title: "Command run",
@@ -749,7 +749,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
         eventId: asEventId("evt-seq-3"),
         provider: "codex",
         createdAt: new Date().toISOString(),
-        threadId: session.threadId,
+        threadId: session.threadId!,
         turnId: asTurnId("turn-1"),
         status: "completed",
       });
@@ -794,7 +794,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
           eventId: asEventId("evt-ordered-1"),
           provider: "codex",
           createdAt: new Date().toISOString(),
-          threadId: session.threadId,
+          threadId: session.threadId!,
           turnId: asTurnId("turn-1"),
           toolKind: "command",
           title: "Command run",
@@ -805,7 +805,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
           eventId: asEventId("evt-ordered-2"),
           provider: "codex",
           createdAt: new Date().toISOString(),
-          threadId: session.threadId,
+          threadId: session.threadId!,
           turnId: asTurnId("turn-1"),
           delta: "hello",
         },
@@ -814,7 +814,7 @@ fanout.layer("ProviderServiceLive fanout", (it) => {
           eventId: asEventId("evt-ordered-3"),
           provider: "codex",
           createdAt: new Date().toISOString(),
-          threadId: session.threadId,
+          threadId: session.threadId!,
           turnId: asTurnId("turn-1"),
           status: "completed",
         },
@@ -892,7 +892,7 @@ validation.layer("ProviderServiceLive validation", (it) => {
       assert.equal(session.threadId, asThreadId("thread-missing"));
 
       const runtime = yield* runtimeRepository.getByThreadId({
-        threadId: session.threadId,
+        threadId: session.threadId!,
       });
       assert.equal(Option.isSome(runtime), true);
       if (Option.isSome(runtime)) {

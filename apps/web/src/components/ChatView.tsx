@@ -2889,6 +2889,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
       setSendPhase("sending-turn");
       const turnAttachments = await turnAttachmentsPromise;
+      // @ts-expect-error ProviderEffort type mismatch with claudeCode effort options
       await api.orchestration.dispatchCommand({
         type: "thread.turn.start",
         commandId: newCommandId(),
@@ -3189,6 +3190,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         // while the same-thread implementation turn is starting.
         setComposerDraftInteractionMode(threadIdForSend, nextInteractionMode);
 
+        // @ts-expect-error ProviderEffort type mismatch with claudeCode effort options
         await api.orchestration.dispatchCommand({
           type: "thread.turn.start",
           commandId: newCommandId(),
@@ -3288,6 +3290,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         createdAt,
       })
       .then(() =>
+        // @ts-expect-error ProviderEffort type mismatch with claudeCode effort options
         api.orchestration.dispatchCommand({
           type: "thread.turn.start",
           commandId: newCommandId(),

@@ -128,7 +128,7 @@ const make = Effect.gen(function* () {
       if (!session?.cwd) {
         return Option.none();
       }
-      return Option.some({ threadId: session.threadId, cwd: session.cwd });
+      return Option.some({ threadId: session.threadId!, cwd: session.cwd });
     };
 
     if (thread) {

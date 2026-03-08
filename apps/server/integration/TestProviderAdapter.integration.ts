@@ -531,7 +531,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
   };
 
   const listActiveSessionIds = (): ReadonlyArray<ThreadId> =>
-    Array.from(sessions.values(), (state) => state.session.threadId);
+    Array.from(sessions.values(), (state) => state.session.threadId!);
 
   const getApprovalResponses = (
     threadId: ThreadId,

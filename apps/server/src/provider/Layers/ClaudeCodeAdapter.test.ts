@@ -261,7 +261,7 @@ describe("ClaudeCodeAdapterLive", () => {
       });
 
       const turn = yield* adapter.sendTurn({
-        threadId: session.threadId,
+        threadId: session.threadId!,
         input: "hello",
         attachments: [],
       });
@@ -397,7 +397,7 @@ describe("ClaudeCodeAdapterLive", () => {
       });
 
       const turn = yield* adapter.sendTurn({
-        threadId: session.threadId,
+        threadId: session.threadId!,
         input: "hello",
         attachments: [],
       });
@@ -486,7 +486,7 @@ describe("ClaudeCodeAdapterLive", () => {
       });
 
       const turn = yield* adapter.sendTurn({
-        threadId: session.threadId,
+        threadId: session.threadId!,
         input: "hello",
         attachments: [],
       });
@@ -557,7 +557,7 @@ describe("ClaudeCodeAdapterLive", () => {
       assert.equal(session.threadId, undefined);
 
       const turn = yield* adapter.sendTurn({
-        threadId: session.threadId,
+        threadId: session.threadId!,
         input: "hello",
         attachments: [],
       });
@@ -666,7 +666,7 @@ describe("ClaudeCodeAdapterLive", () => {
       }
 
       yield* adapter.respondToRequest(
-        session.threadId,
+        session.threadId!,
         ApprovalRequestId.makeUnsafe(runtimeRequestId),
         "accept",
       );
@@ -761,7 +761,7 @@ describe("ClaudeCodeAdapterLive", () => {
       });
 
       const firstTurn = yield* adapter.sendTurn({
-        threadId: session.threadId,
+        threadId: session.threadId!,
         input: "first",
         attachments: [],
       });
@@ -787,7 +787,7 @@ describe("ClaudeCodeAdapterLive", () => {
       }
 
       const secondTurn = yield* adapter.sendTurn({
-        threadId: session.threadId,
+        threadId: session.threadId!,
         input: "second",
         attachments: [],
       });
@@ -812,14 +812,14 @@ describe("ClaudeCodeAdapterLive", () => {
         assert.equal(String(secondCompleted.value.turnId), String(secondTurn.turnId));
       }
 
-      const threadBeforeRollback = yield* adapter.readThread(session.threadId);
+      const threadBeforeRollback = yield* adapter.readThread(session.threadId!);
       assert.equal(threadBeforeRollback.turns.length, 2);
 
-      const rolledBack = yield* adapter.rollbackThread(session.threadId, 1);
+      const rolledBack = yield* adapter.rollbackThread(session.threadId!, 1);
       assert.equal(rolledBack.turns.length, 1);
       assert.equal(rolledBack.turns[0]?.id, firstTurn.turnId);
 
-      const threadAfterRollback = yield* adapter.readThread(session.threadId);
+      const threadAfterRollback = yield* adapter.readThread(session.threadId!);
       assert.equal(threadAfterRollback.turns.length, 1);
       assert.equal(threadAfterRollback.turns[0]?.id, firstTurn.turnId);
     }).pipe(
@@ -839,7 +839,7 @@ describe("ClaudeCodeAdapterLive", () => {
         runtimeMode: "full-access",
       });
       yield* adapter.sendTurn({
-        threadId: session.threadId,
+        threadId: session.threadId!,
         input: "hello",
         model: "claude-opus-4-6",
         attachments: [],
@@ -880,7 +880,7 @@ describe("ClaudeCodeAdapterLive", () => {
         runtimeMode: "full-access",
       });
       const turn = yield* adapter.sendTurn({
-        threadId: session.threadId,
+        threadId: session.threadId!,
         input: "hello",
         attachments: [],
       });

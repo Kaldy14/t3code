@@ -63,5 +63,4 @@ Effect.gen(function* () {
   const mainLayer = Layer.mergeAll(dualLogger, Layer.succeed(LogDir, logdir));
 
   yield* main.pipe(Effect.provide(mainLayer));
-// @ts-expect-error Effect 4 beta layer mismatch
 }).pipe(Effect.scoped, Effect.provide(NodeServices.layer), NodeRuntime.runMain);

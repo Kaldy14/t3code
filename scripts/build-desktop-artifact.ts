@@ -767,7 +767,6 @@ const cliRuntimeLayer = Layer.mergeAll(Logger.layer([Logger.consolePretty()]), N
 
 Command.run(buildDesktopArtifactCli, { version: "0.0.0" }).pipe(
   Effect.scoped,
-  // @ts-expect-error Effect 4 beta: NodeServices.layer tag mismatch with effect/unstable/process
   Effect.provide(cliRuntimeLayer),
   NodeRuntime.runMain,
 );
