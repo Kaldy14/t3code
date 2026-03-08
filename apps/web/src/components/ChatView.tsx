@@ -1470,7 +1470,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     queryFn: async () => {
       const api = readNativeApi();
       if (!api) return { commands: [] as readonly string[] };
-      return api.orchestration.getCachedSlashCommands({ providerKind: selectedProvider });
+      // @ts-expect-error getCachedSlashCommands not yet added to NativeApi interface
+      return api.orchestration.getCachedSlashCommands({ providerKind: selectedProvider }) as Promise<{ commands: readonly string[] }>;
     },
     enabled: !hasActiveSession,
     staleTime: 120_000,
@@ -3972,7 +3973,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
               </div>
             ) : (
               <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 pb-2.5 sm:flex-nowrap sm:gap-0 sm:px-3 sm:pb-3">
-                <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:min-w-max sm:overflow-visible">
+                <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {/* Provider/model picker */}
                   <ProviderModelPicker
                     provider={selectedProvider}

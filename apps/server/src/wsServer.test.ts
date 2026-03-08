@@ -452,11 +452,13 @@ describe("WebSocket Server", () => {
       Layer.provideMerge(NodeServices.layer),
     );
     const runtimeServices = await Effect.runPromise(
+      // @ts-expect-error Effect 4 beta layer mismatch
       Layer.build(dependenciesLayer).pipe(Scope.provide(scope)),
     );
 
     try {
       const runtime = await Effect.runPromise(
+        // @ts-expect-error Effect 4 beta layer mismatch
         createServer().pipe(Effect.provide(runtimeServices), Scope.provide(scope)),
       );
       serverScope = scope;
@@ -653,7 +655,7 @@ describe("WebSocket Server", () => {
     const stateDir = makeTempDir("t3code-state-bootstrap-existing-");
     const persistenceLayer = makeSqlitePersistenceLive(path.join(stateDir, "state.sqlite")).pipe(
       Layer.provide(NodeServices.layer),
-    );
+    ) as any;
     const cwd = "/test/bootstrap-existing";
 
     server = await createTestServer({

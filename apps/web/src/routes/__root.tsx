@@ -20,6 +20,7 @@ import { useTerminalStateStore } from "../terminalStateStore";
 import { preferredTerminalEditor } from "../terminal-links";
 import { terminalRunningSubprocessFromEvent } from "../terminalActivity";
 import { onServerConfigUpdated, onServerWelcome } from "../wsNativeApi";
+import { dispatchActivityNotification, dispatchSessionSetNotification, requestNotificationPermission } from "../lib/notifications";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
 
@@ -144,12 +145,17 @@ function EventRouter() {
   pathnameRef.current = pathname;
 
   useEffect(() => {
+    requestNotificationPermission();
+  }, []);
+
+  useEffect(() => {
     const api = readNativeApi();
     if (!api) return;
     let disposed = false;
     let latestSequence = 0;
     let syncing = false;
     let pending = false;
+    const sessionStatusByThread = new Map<string, import("@t3tools/contracts").OrchestrationSessionStatus>();
 
     const flushSnapshotSync = async (): Promise<void> => {
       const snapshot = await api.orchestration.getSnapshot();
@@ -162,6 +168,7 @@ function EventRouter() {
       const activeThreadIds = collectActiveTerminalThreadIds({
         snapshotThreads: snapshot.threads,
         draftThreadIds,
+        projectIds: snapshot.projects.map((p) => p.id),
       });
       removeOrphanedTerminalStates(activeThreadIds);
       if (pending) {
@@ -196,6 +203,19 @@ function EventRouter() {
         void queryClient.invalidateQueries({ queryKey: providerQueryKeys.all });
       }
       void syncSnapshot();
+      if (event.type === "thread.activity-appended") {
+        const threads = useStore.getState().threads;
+        const thread = threads.find((t) => t.id === event.payload.threadId);
+        dispatchActivityNotification(event.payload.activity, thread?.title ?? "Thread");
+      }
+      if (event.type === "thread.session-set") {
+        const { threadId, session } = event.payload;
+        const previousStatus = sessionStatusByThread.get(threadId) ?? null;
+        sessionStatusByThread.set(threadId, session.status);
+        const threads = useStore.getState().threads;
+        const thread = threads.find((t) => t.id === threadId);
+        dispatchSessionSetNotification(threadId, thread?.title ?? "Thread", session.status, previousStatus);
+      }
     });
     const unsubTerminalEvent = api.terminal.onEvent((event) => {
       const hasRunningSubprocess = terminalRunningSubprocessFromEvent(event);

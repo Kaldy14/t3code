@@ -753,25 +753,25 @@ describe.skipIf(!process.env.CODEX_BINARY_PATH)("startSession live Codex resume"
         });
 
         const firstTurn = await manager.sendTurn({
-          threadId: firstSession.threadId,
+          threadId: firstSession.threadId!,
           input: `Reply with exactly the word ALPHA ${randomUUID()}`,
         });
 
         expect(firstTurn.threadId).toBe(firstSession.threadId);
 
         await vi.waitFor(async () => {
-          const snapshot = await manager.readThread(firstSession.threadId);
+          const snapshot = await manager.readThread(firstSession.threadId!);
           expect(snapshot.turns.length).toBeGreaterThan(0);
         }, { timeout: 120_000, interval: 1_000 });
 
-        const firstSnapshot = await manager.readThread(firstSession.threadId);
+        const firstSnapshot = await manager.readThread(firstSession.threadId!);
         const originalThreadId = firstSnapshot.threadId;
         const originalTurnCount = firstSnapshot.turns.length;
 
-        manager.stopSession(firstSession.threadId);
+        manager.stopSession(firstSession.threadId!);
 
         const resumedSession = await manager.startSession({
-          threadId: firstSession.threadId,
+          threadId: firstSession.threadId!,
           provider: "codex",
           cwd: workspaceDir,
           runtimeMode: "approval-required",
@@ -790,17 +790,17 @@ describe.skipIf(!process.env.CODEX_BINARY_PATH)("startSession live Codex resume"
 
         expect(resumedSession.threadId).toBe(originalThreadId);
 
-        const resumedSnapshotBeforeTurn = await manager.readThread(resumedSession.threadId);
+        const resumedSnapshotBeforeTurn = await manager.readThread(resumedSession.threadId!);
         expect(resumedSnapshotBeforeTurn.threadId).toBe(originalThreadId);
         expect(resumedSnapshotBeforeTurn.turns.length).toBeGreaterThanOrEqual(originalTurnCount);
 
         await manager.sendTurn({
-          threadId: resumedSession.threadId,
+          threadId: resumedSession.threadId!,
           input: `Reply with exactly the word BETA ${randomUUID()}`,
         });
 
         await vi.waitFor(async () => {
-          const snapshot = await manager.readThread(resumedSession.threadId);
+          const snapshot = await manager.readThread(resumedSession.threadId!);
           expect(snapshot.turns.length).toBeGreaterThan(originalTurnCount);
         }, { timeout: 120_000, interval: 1_000 });
       } finally {

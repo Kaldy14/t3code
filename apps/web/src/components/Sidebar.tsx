@@ -25,7 +25,7 @@ import { APP_STAGE_LABEL } from "../branding";
 import { newCommandId, newProjectId, newThreadId } from "../lib/utils";
 import { useStore } from "../store";
 import { isChatNewLocalShortcut, isChatNewShortcut, shortcutLabelForCommand } from "../keybindings";
-import { type Thread } from "../types";
+import { type Thread, projectTerminalThreadId } from "../types";
 import { derivePendingApprovals, derivePendingUserInputs } from "../session-logic";
 import { gitRemoveWorktreeMutationOptions, gitStatusQueryOptions } from "../lib/gitReactQuery";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
@@ -283,6 +283,7 @@ export default function Sidebar() {
   const getDraftThread = useComposerDraftStore((store) => store.getDraftThread);
   const terminalStateByThreadId = useTerminalStateStore((state) => state.terminalStateByThreadId);
   const clearTerminalState = useTerminalStateStore((state) => state.clearTerminalState);
+  const storeSetTerminalOpen = useTerminalStateStore((state) => state.setTerminalOpen);
   const setProjectDraftThreadId = useComposerDraftStore((store) => store.setProjectDraftThreadId);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const clearProjectDraftThreadId = useComposerDraftStore(
@@ -1093,6 +1094,51 @@ export default function Sidebar() {
                           {project.name}
                         </span>
                       </CollapsibleTrigger>
+                      {(() => {
+                        const projTermThreadId = projectTerminalThreadId(project.id);
+                        const projTermState = selectThreadTerminalState(
+                          terminalStateByThreadId,
+                          projTermThreadId,
+                        );
+                        const hasRunning = projTermState.runningTerminalIds.length > 0;
+                        const isOpen = projTermState.terminalOpen;
+                        return (
+                          <Tooltip>
+                            <TooltipTrigger
+                              render={
+                                <SidebarMenuAction
+                                  render={
+                                    <button
+                                      type="button"
+                                      aria-label={`Toggle project terminal for ${project.name}`}
+                                    />
+                                  }
+                                  showOnHover={!hasRunning}
+                                  className={`top-1 right-7 size-5 rounded-md p-0 hover:bg-secondary hover:text-foreground ${
+                                    hasRunning
+                                      ? "text-teal-600 dark:text-teal-300/90"
+                                      : isOpen
+                                        ? "text-foreground"
+                                        : "text-muted-foreground/70"
+                                  }`}
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    storeSetTerminalOpen(projTermThreadId, !isOpen);
+                                  }}
+                                >
+                                  <TerminalIcon
+                                    className={`size-3.5 ${hasRunning ? "animate-pulse" : ""}`}
+                                  />
+                                </SidebarMenuAction>
+                              }
+                            />
+                            <TooltipPopup side="top">
+                              {isOpen ? "Close project terminal" : "Open project terminal"}
+                            </TooltipPopup>
+                          </Tooltip>
+                        );
+                      })()}
                       <Tooltip>
                         <TooltipTrigger
                           render={

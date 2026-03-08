@@ -23,6 +23,16 @@ export const DEFAULT_THREAD_TERMINAL_ID = "default";
 export const MAX_THREAD_TERMINAL_COUNT = 4;
 export type ProjectScript = ContractProjectScript;
 
+export const PROJECT_TERMINAL_THREAD_PREFIX = "__project_terminal__:";
+
+export function projectTerminalThreadId(projectId: ProjectId): ThreadId {
+  return `${PROJECT_TERMINAL_THREAD_PREFIX}${projectId}` as ThreadId;
+}
+
+export function isProjectTerminalThreadId(threadId: string): boolean {
+  return threadId.startsWith(PROJECT_TERMINAL_THREAD_PREFIX);
+}
+
 export interface ThreadTerminalGroup {
   id: string;
   terminalIds: string[];

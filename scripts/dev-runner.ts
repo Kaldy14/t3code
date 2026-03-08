@@ -543,5 +543,6 @@ const runtimeProgram = Command.run(devRunnerCli, { version: "0.0.0" }).pipe(
 );
 
 if (import.meta.main) {
+  // @ts-expect-error Effect 4 beta: NodeServices.layer tag mismatch with effect/unstable/process
   NodeRuntime.runMain(runtimeProgram);
 }

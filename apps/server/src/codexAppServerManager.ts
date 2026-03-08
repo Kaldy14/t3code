@@ -743,7 +743,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     }
 
     const providerThreadId = readResumeThreadId({
-      threadId: context.session.threadId,
+      threadId: context.session.threadId!,
       runtimeMode: context.session.runtimeMode,
       resumeCursor: context.session.resumeCursor,
     });
@@ -826,7 +826,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
     const effectiveTurnId = turnId ?? context.session.activeTurnId;
 
     const providerThreadId = readResumeThreadId({
-      threadId: context.session.threadId,
+      threadId: context.session.threadId!,
       runtimeMode: context.session.runtimeMode,
       resumeCursor: context.session.resumeCursor,
     });
@@ -843,7 +843,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   async readThread(threadId: ThreadId): Promise<CodexThreadSnapshot> {
     const context = this.requireSession(threadId);
     const providerThreadId = readResumeThreadId({
-      threadId: context.session.threadId,
+      threadId: context.session.threadId!,
       runtimeMode: context.session.runtimeMode,
       resumeCursor: context.session.resumeCursor,
     });
@@ -861,7 +861,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
   async rollbackThread(threadId: ThreadId, numTurns: number): Promise<CodexThreadSnapshot> {
     const context = this.requireSession(threadId);
     const providerThreadId = readResumeThreadId({
-      threadId: context.session.threadId,
+      threadId: context.session.threadId!,
       runtimeMode: context.session.runtimeMode,
       resumeCursor: context.session.resumeCursor,
     });
@@ -906,7 +906,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       id: EventId.makeUnsafe(randomUUID()),
       kind: "notification",
       provider: "codex",
-      threadId: context.session.threadId,
+      threadId: context.session.threadId!,
       createdAt: new Date().toISOString(),
       method: "item/requestApproval/decision",
       turnId: pendingRequest.turnId,
@@ -945,7 +945,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       id: EventId.makeUnsafe(randomUUID()),
       kind: "notification",
       provider: "codex",
-      threadId: context.session.threadId,
+      threadId: context.session.threadId!,
       createdAt: new Date().toISOString(),
       method: "item/tool/requestUserInput/answered",
       turnId: pendingRequest.turnId,
@@ -1056,7 +1056,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
         lastError: code === 0 ? context.session.lastError : message,
       });
       this.emitLifecycleEvent(context, "session/exited", message);
-      this.sessions.delete(context.session.threadId);
+      this.sessions.delete(context.session.threadId!);
     });
   }
 
@@ -1118,7 +1118,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       id: EventId.makeUnsafe(randomUUID()),
       kind: "notification",
       provider: "codex",
-      threadId: context.session.threadId,
+      threadId: context.session.threadId!,
       createdAt: new Date().toISOString(),
       method: notification.method,
       turnId: route.turnId,
@@ -1185,7 +1185,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
               ? "item/fileRead/requestApproval"
               : "item/fileChange/requestApproval",
         requestKind,
-        threadId: context.session.threadId,
+        threadId: context.session.threadId!,
         ...(route.turnId ? { turnId: route.turnId } : {}),
         ...(route.itemId ? { itemId: route.itemId } : {}),
       };
@@ -1197,7 +1197,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       context.pendingUserInputs.set(requestId, {
         requestId,
         jsonRpcId: request.id,
-        threadId: context.session.threadId,
+        threadId: context.session.threadId!,
         ...(route.turnId ? { turnId: route.turnId } : {}),
         ...(route.itemId ? { itemId: route.itemId } : {}),
       });
@@ -1207,7 +1207,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       id: EventId.makeUnsafe(randomUUID()),
       kind: "request",
       provider: "codex",
-      threadId: context.session.threadId,
+      threadId: context.session.threadId!,
       createdAt: new Date().toISOString(),
       method: request.method,
       turnId: route.turnId,
@@ -1297,7 +1297,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       id: EventId.makeUnsafe(randomUUID()),
       kind: "session",
       provider: "codex",
-      threadId: context.session.threadId,
+      threadId: context.session.threadId!,
       createdAt: new Date().toISOString(),
       method,
       message,
@@ -1309,7 +1309,7 @@ export class CodexAppServerManager extends EventEmitter<CodexAppServerManagerEve
       id: EventId.makeUnsafe(randomUUID()),
       kind: "error",
       provider: "codex",
-      threadId: context.session.threadId,
+      threadId: context.session.threadId!,
       createdAt: new Date().toISOString(),
       method,
       message,

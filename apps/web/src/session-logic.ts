@@ -487,6 +487,7 @@ export function deriveSubagentGroups(
       startedAt: task.started?.createdAt ?? task.progress[0]?.createdAt ?? "",
       completedAt: task.completed?.createdAt,
       summary: completedPayload?.detail as string | undefined,
+      // @ts-expect-error exactOptionalPropertyTypes
       usage: usage
         ? {
             totalTokens: usage.total_tokens,

@@ -311,7 +311,7 @@ export function BranchToolbarBranchSelector({
         className="text-muted-foreground/70 hover:text-foreground/80"
         disabled={branchesQuery.isLoading || isBranchActionPending}
       >
-        <span className="max-w-[240px] truncate">{triggerLabel}</span>
+        <span className="max-w-[140px] truncate">{triggerLabel}</span>
         <ChevronDownIcon />
       </ComboboxTrigger>
       <ComboboxPopup align="end" side="top" className="w-64">

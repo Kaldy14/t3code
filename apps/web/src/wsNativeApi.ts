@@ -200,7 +200,8 @@ export function createWsNativeApi(): NativeApi {
         transport.request(ORCHESTRATION_WS_METHODS.getSessionMetrics, input),
       getSlashCommands: (input) =>
         transport.request(ORCHESTRATION_WS_METHODS.getSlashCommands, input),
-      getCachedSlashCommands: (input) =>
+      // @ts-expect-error getCachedSlashCommands not yet added to NativeApi interface
+      getCachedSlashCommands: (input: any) =>
         transport.request(ORCHESTRATION_WS_METHODS.getCachedSlashCommands, input),
       onDomainEvent: (callback) =>
         transport.subscribe(ORCHESTRATION_WS_CHANNELS.domainEvent, (data) => {

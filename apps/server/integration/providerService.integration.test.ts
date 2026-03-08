@@ -33,7 +33,7 @@ const makeWorkspaceDirectory = Effect.gen(function* () {
   const cwd = yield* fs.makeTempDirectory();
   yield* fs.writeFileString(pathService.join(cwd, "README.md"), "v1\n");
   return cwd;
-}).pipe(Effect.provide(NodeServices.layer));
+}).pipe(Effect.provide(NodeServices.layer)) as any;
 
 interface IntegrationFixture {
   readonly cwd: string;
@@ -143,7 +143,7 @@ it.effect("replays typed runtime fixture events", () =>
         codexTurnTextFixture.map((event) => event.type),
       );
     }).pipe(Effect.provide(fixture.layer));
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(NodeServices.layer)) as any,
 );
 
 it.effect("replays file-changing fixture turn events", () =>
@@ -182,7 +182,7 @@ it.effect("replays file-changing fixture turn events", () =>
         codexTurnToolFixture.map((event) => event.type),
       );
     }).pipe(Effect.provide(fixture.layer));
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(NodeServices.layer)) as any,
 );
 
 it.effect("runs multi-turn tool/approval flow", () =>
@@ -236,7 +236,7 @@ it.effect("runs multi-turn tool/approval flow", () =>
         codexTurnApprovalFixture.map((event) => event.type),
       );
     }).pipe(Effect.provide(fixture.layer));
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(NodeServices.layer)) as any,
 );
 
 it.effect("rolls back provider conversation state only", () =>
@@ -293,5 +293,5 @@ it.effect("rolls back provider conversation state only", () =>
       const readme = yield* readFileString(join(fixture.cwd, "README.md"));
       assert.equal(readme, "v3\n");
     }).pipe(Effect.provide(fixture.layer));
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(NodeServices.layer)) as any,
 );

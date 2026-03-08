@@ -1,9 +1,48 @@
 import { Outlet, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
 import ThreadSidebar from "../components/Sidebar";
 import { Sidebar, SidebarProvider } from "~/components/ui/sidebar";
+import { useStore } from "../store";
+import { useTerminalStateStore } from "../terminalStateStore";
+import { projectTerminalThreadId } from "../types";
+
+const ProjectTerminalDrawer = lazy(() => import("../components/ProjectTerminalDrawer"));
+
+function ProjectTerminalDrawers() {
+  const projects = useStore((s) => s.projects);
+  const terminalStateByThreadId = useTerminalStateStore((s) => s.terminalStateByThreadId);
+  const setTerminalOpen = useTerminalStateStore((s) => s.setTerminalOpen);
+  const setTerminalHeight = useTerminalStateStore((s) => s.setTerminalHeight);
+
+  const openProjectTerminals = projects.filter((project) => {
+    const syntheticId = projectTerminalThreadId(project.id);
+    const state = terminalStateByThreadId[syntheticId];
+    return state?.terminalOpen === true;
+  });
+
+  if (openProjectTerminals.length === 0) return null;
+
+  return (
+    <Suspense fallback={null}>
+      {openProjectTerminals.map((project) => {
+        const syntheticId = projectTerminalThreadId(project.id);
+        const state = terminalStateByThreadId[syntheticId];
+        return (
+          <ProjectTerminalDrawer
+            key={project.id}
+            projectId={project.id}
+            cwd={project.cwd}
+            height={state?.terminalHeight ?? 280}
+            onHeightChange={(height) => setTerminalHeight(syntheticId, height)}
+            onClose={() => setTerminalOpen(syntheticId, false)}
+          />
+        );
+      })}
+    </Suspense>
+  );
+}
 
 function ChatRouteLayout() {
   const navigate = useNavigate();
@@ -35,6 +74,7 @@ function ChatRouteLayout() {
       </Sidebar>
       <DiffWorkerPoolProvider>
         <Outlet />
+        <ProjectTerminalDrawers />
       </DiffWorkerPoolProvider>
     </SidebarProvider>
   );
