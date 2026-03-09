@@ -4242,17 +4242,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   pendingCount={pendingApprovals.length}
                 />
               </div>
-            ) : pendingUserInputs.length > 0 ? (
-              <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
-                <ComposerPendingUserInputPanel
-                  pendingUserInputs={pendingUserInputs}
-                  respondingRequestIds={respondingUserInputRequestIds}
-                  answers={activePendingDraftAnswers}
-                  questionIndex={activePendingQuestionIndex}
-                  onSelectOption={onSelectActivePendingUserInputOption}
-                  onAdvance={onAdvanceActivePendingUserInput}
-                />
-              </div>
             ) : showPlanFollowUpPrompt && activeProposedPlan ? (
               <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
                 <ComposerPlanFollowUpBanner
@@ -4409,7 +4398,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 />
               </div>
             ) : (
-              <div className="flex flex-wrap items-center justify-between gap-2 px-2.5 pb-2.5 sm:flex-nowrap sm:gap-0 sm:px-3 sm:pb-3">
+              <div className={cn(
+                "flex flex-wrap items-center justify-between gap-2 px-2.5 pb-2.5 sm:flex-nowrap sm:gap-0 sm:px-3 sm:pb-3",
+                pendingUserInputs.length > 0 && "pt-2.5 sm:pt-3",
+              )}>
                 <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {/* Provider/model picker */}
                   <ProviderModelPicker
@@ -5918,7 +5910,7 @@ const UserInputQuestionCard = memo(function UserInputQuestionCard({
 
               {/* Options */}
               {hasOptions && (
-                <div className="flex flex-wrap gap-1.5 pl-3.5">
+                <div className="space-y-1 pl-3.5">
                   {question.options.map((option) => {
                     const isSelected = selectedOption === option.label && !customValue.trim();
                     return (
@@ -5927,17 +5919,26 @@ const UserInputQuestionCard = memo(function UserInputQuestionCard({
                         type="button"
                         disabled={isResponding}
                         onClick={() => onSelectOption(question.id, option.label)}
-                        title={option.description}
                         className={cn(
-                          "rounded-md border px-2.5 py-1 text-xs font-medium transition-all duration-150",
+                          "group flex w-full items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-all duration-150",
                           "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
                           isSelected
-                            ? "border-primary/70 bg-primary text-primary-foreground shadow-sm shadow-primary/20"
-                            : "border-border/40 text-foreground/70 hover:border-border/70 hover:bg-muted/30",
+                            ? "border-primary/40 bg-primary/8 text-foreground"
+                            : "border-transparent bg-muted/20 text-foreground/80 hover:bg-muted/40 hover:border-border/40",
                           isResponding && "pointer-events-none opacity-50",
                         )}
                       >
-                        {option.label}
+                        <div className="min-w-0 flex-1">
+                          <span className="text-xs font-medium">{option.label}</span>
+                          {option.description && option.description !== option.label ? (
+                            <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/50">
+                              {option.description}
+                            </p>
+                          ) : null}
+                        </div>
+                        {isSelected ? (
+                          <CheckIcon className="size-3.5 shrink-0 text-primary" />
+                        ) : null}
                       </button>
                     );
                   })}
