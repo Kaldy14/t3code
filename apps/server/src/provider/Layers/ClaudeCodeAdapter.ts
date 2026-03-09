@@ -117,7 +117,9 @@ interface ToolInFlight {
   readonly itemType: CanonicalItemType;
   readonly toolName: string;
   readonly title: string;
-  readonly detail?: string;
+  detail?: string;
+  /** Accumulated input_json_delta chunks for re-summarization at block stop. */
+  inputJsonChunks: string[];
 }
 
 interface ClaudeSessionContext {
@@ -904,6 +906,14 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         const { event } = message;
 
         if (event.type === "content_block_delta") {
+          // Accumulate input_json_delta chunks for tool input re-summarization
+          if (event.delta.type === "input_json_delta" && typeof event.delta.partial_json === "string") {
+            const tool = context.inFlightTools.get(event.index);
+            if (tool) {
+              tool.inputJsonChunks.push(event.delta.partial_json);
+            }
+          }
+
           if (
             event.delta.type === "text_delta" &&
             event.delta.text.length > 0 &&
@@ -1004,6 +1014,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
             toolName,
             title: titleForTool(itemType),
             detail,
+            inputJsonChunks: [],
           };
           context.inFlightTools.set(index, tool);
 
@@ -1047,6 +1058,16 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
             return;
           }
           context.inFlightTools.delete(index);
+
+          // Re-summarize with the full accumulated tool input if available
+          if (tool.inputJsonChunks.length > 0) {
+            try {
+              const fullInput = JSON.parse(tool.inputJsonChunks.join("")) as Record<string, unknown>;
+              tool.detail = summarizeToolRequest(tool.toolName, fullInput);
+            } catch {
+              // Keep the original detail if JSON parsing fails
+            }
+          }
 
           const stamp = yield* makeEventStamp();
           yield* offerRuntimeEvent({
