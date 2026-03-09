@@ -1206,6 +1206,12 @@ const make = Effect.gen(function* () {
         yield* clearTurnStateForSession(thread.id);
       }
 
+      // Reset context occupancy on compact so the HUD reflects the drop immediately.
+      // The next turn will overwrite with fresh SDK-reported usage.
+      if (event.type === "thread.state.changed" && event.payload.state === "compacted") {
+        contextOccupancyStore.set(thread.id, 0);
+      }
+
       if (event.type === "thread.token-usage.updated") {
         const turnId = toTurnId(event.turnId) ?? (activeTurnId !== null ? activeTurnId : undefined);
         if (turnId) {
