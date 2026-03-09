@@ -63,11 +63,12 @@ const CursorProviderStartOptions = Schema.Struct({
   binaryPath: Schema.optional(TrimmedNonEmptyStringSchema),
 });
 
-const ProviderStartOptions = Schema.Struct({
+export const ProviderStartOptions = Schema.Struct({
   codex: Schema.optional(CodexProviderStartOptions),
   claudeCode: Schema.optional(ClaudeCodeProviderStartOptions),
   cursor: Schema.optional(CursorProviderStartOptions),
 });
+export type ProviderStartOptions = typeof ProviderStartOptions.Type;
 
 export const ProviderSessionStartInput = Schema.Struct({
   threadId: ThreadId,

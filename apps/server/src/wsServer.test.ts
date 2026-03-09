@@ -1108,13 +1108,14 @@ describe("WebSocket Server", () => {
     connections.push(ws);
     await waitForMessage(ws);
 
+    const workspaceRoot = makeTempDir("t3code-ws-diff-project-");
     const createdAt = new Date().toISOString();
     const createProjectResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
       type: "project.create",
       commandId: "cmd-diff-project-create",
       projectId: "project-diff",
       title: "Diff Project",
-      workspaceRoot: "/tmp/ws-diff-project",
+      workspaceRoot,
       defaultModel: "gpt-5-codex",
       createdAt,
     });
@@ -1187,13 +1188,14 @@ describe("WebSocket Server", () => {
     connections.push(ws);
     await waitForMessage(ws);
 
+    const workspaceRoot = makeTempDir("t3code-ws-project-");
     const createdAt = new Date().toISOString();
     const createProjectResponse = await sendRequest(ws, ORCHESTRATION_WS_METHODS.dispatchCommand, {
       type: "project.create",
       commandId: "cmd-ws-project-create",
       projectId: "project-1",
       title: "WS Project",
-      workspaceRoot: "/tmp/ws-project",
+      workspaceRoot,
       defaultModel: "gpt-5-codex",
       createdAt,
     });
@@ -1332,9 +1334,7 @@ describe("WebSocket Server", () => {
     };
     terminalManager.emitEvent(manualEvent);
 
-    const push = (await waitForMessage(ws)) as WsPush;
-    expect(push.type).toBe("push");
-    expect(push.channel).toBe(WS_CHANNELS.terminalEvent);
+    const push = await waitForPush(ws, WS_CHANNELS.terminalEvent);
     expect((push.data as TerminalEvent).type).toBe("output");
   });
 

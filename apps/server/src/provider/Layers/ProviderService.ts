@@ -88,13 +88,28 @@ function toRuntimeStatus(session: ProviderSession): "starting" | "running" | "st
   }
 }
 
-function toRuntimePayloadFromSession(session: ProviderSession): Record<string, unknown> {
+function toRuntimePayloadFromSession(
+  session: ProviderSession,
+  extra?: { readonly providerOptions?: unknown },
+): Record<string, unknown> {
   return {
     cwd: session.cwd ?? null,
     model: session.model ?? null,
     activeTurnId: session.activeTurnId ?? null,
     lastError: session.lastError ?? null,
+    ...(extra?.providerOptions !== undefined ? { providerOptions: extra.providerOptions } : {}),
   };
+}
+
+function readPersistedProviderOptions(
+  runtimePayload: ProviderRuntimeBinding["runtimePayload"],
+): Record<string, unknown> | undefined {
+  if (!runtimePayload || typeof runtimePayload !== "object" || Array.isArray(runtimePayload)) {
+    return undefined;
+  }
+  const raw = "providerOptions" in runtimePayload ? runtimePayload.providerOptions : undefined;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  return raw as Record<string, unknown>;
 }
 
 function readPersistedCwd(
@@ -139,6 +154,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
     const upsertSessionBinding = (
       session: ProviderSession,
       threadId: ThreadId,
+      extra?: { readonly providerOptions?: unknown },
     ) =>
       directory.upsert({
         threadId,
@@ -146,7 +162,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         runtimeMode: session.runtimeMode,
         status: toRuntimeStatus(session),
         ...(session.resumeCursor !== undefined ? { resumeCursor: session.resumeCursor } : {}),
-        runtimePayload: toRuntimePayloadFromSession(session),
+        runtimePayload: toRuntimePayloadFromSession(session, extra),
       });
 
     const providers = yield* registry.listProviders();
@@ -199,11 +215,13 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         }
 
         const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
+        const persistedProviderOptions = readPersistedProviderOptions(input.binding.runtimePayload);
 
         const resumed = yield* adapter.startSession({
           threadId: input.binding.threadId,
           provider: input.binding.provider,
           ...(persistedCwd ? { cwd: persistedCwd } : {}),
+          ...(persistedProviderOptions ? { providerOptions: persistedProviderOptions } : {}),
           ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
           runtimeMode: input.binding.runtimeMode ?? "full-access",
         });
@@ -275,7 +293,9 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
           );
         }
 
-        yield* upsertSessionBinding(session, threadId);
+        yield* upsertSessionBinding(session, threadId, {
+          ...(input.providerOptions !== undefined ? { providerOptions: input.providerOptions } : {}),
+        });
         yield* analytics.record("provider.session.started", {
           provider: session.provider,
           runtimeMode: input.runtimeMode,
@@ -438,13 +458,17 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
             return session;
           }
 
-          return {
-            ...session,
-            ...(session.resumeCursor === undefined && binding.resumeCursor !== undefined
-              ? { resumeCursor: binding.resumeCursor }
-              : {}),
-            ...(binding.runtimeMode !== undefined ? { runtimeMode: binding.runtimeMode } : {}),
-          };
+          const overrides: {
+            resumeCursor?: ProviderSession["resumeCursor"];
+            runtimeMode?: ProviderSession["runtimeMode"];
+          } = {};
+          if (session.resumeCursor === undefined && binding.resumeCursor !== undefined) {
+            overrides.resumeCursor = binding.resumeCursor;
+          }
+          if (binding.runtimeMode !== undefined) {
+            overrides.runtimeMode = binding.runtimeMode;
+          }
+          return Object.assign({}, session, overrides);
         });
       });
 

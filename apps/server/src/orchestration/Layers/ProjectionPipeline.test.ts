@@ -1908,6 +1908,7 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
             name: "Build",
             command: "bun run build",
             icon: "build",
+            terminalTarget: "thread",
             runOnWorktreeCreate: false,
           },
         ],

@@ -73,6 +73,7 @@ describe("decider project scripts", () => {
         name: "Lint",
         command: "bun run lint",
         icon: "lint",
+        terminalTarget: "thread",
         runOnWorktreeCreate: false,
       },
     ] as const;

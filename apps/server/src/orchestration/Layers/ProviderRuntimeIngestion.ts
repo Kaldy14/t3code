@@ -13,6 +13,8 @@ import {
 import { Cache, Cause, Duration, Effect, Layer, Option, Queue, Ref, Stream } from "effect";
 
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { resolveThreadWorkspaceCwd } from "../../checkpointing/Utils.ts";
+import { isGitRepository } from "../../git/isRepo.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import {
   ProviderRuntimeIngestionService,
@@ -649,6 +651,22 @@ const make = Effect.gen(function* () {
     lookup: () => Effect.succeed({ text: "", createdAt: "" }),
   });
 
+  const isGitRepoForThread = Effect.fnUntraced(function* (threadId: ThreadId) {
+    const readModel = yield* orchestrationEngine.getReadModel();
+    const thread = readModel.threads.find((entry) => entry.id === threadId);
+    if (!thread) {
+      return false;
+    }
+    const workspaceCwd = resolveThreadWorkspaceCwd({
+      thread,
+      projects: readModel.projects,
+    });
+    if (!workspaceCwd) {
+      return false;
+    }
+    return isGitRepository(workspaceCwd);
+  });
+
   const rememberAssistantMessageId = (
     threadId: ThreadId,
     turnId: TurnId,
@@ -1075,6 +1093,10 @@ const make = Effect.gen(function* () {
       if (assistantCompletion) {
         const assistantMessageId = assistantCompletion.messageId;
         const turnId = toTurnId(event.turnId);
+        const existingAssistantMessage = thread.messages.find((entry) => entry.id === assistantMessageId);
+        const shouldApplyFallbackCompletionText =
+          !existingAssistantMessage ||
+          existingAssistantMessage.text.length === 0;
         if (turnId) {
           yield* rememberAssistantMessageId(thread.id, turnId, assistantMessageId);
         }
@@ -1087,7 +1109,7 @@ const make = Effect.gen(function* () {
           createdAt: now,
           commandTag: "assistant-complete",
           finalDeltaCommandTag: "assistant-delta-finalize",
-          ...(assistantCompletion.fallbackText !== undefined
+          ...(assistantCompletion.fallbackText !== undefined && shouldApplyFallbackCompletionText
             ? { fallbackText: assistantCompletion.fallbackText }
             : {}),
         });
@@ -1250,7 +1272,7 @@ const make = Effect.gen(function* () {
 
       if (event.type === "turn.diff.updated") {
         const turnId = toTurnId(event.turnId);
-        if (turnId) {
+        if (turnId && (yield* isGitRepoForThread(thread.id))) {
           const assistantMessageId = MessageId.makeUnsafe(
             `assistant:${event.itemId ?? event.turnId ?? event.eventId}`,
           );

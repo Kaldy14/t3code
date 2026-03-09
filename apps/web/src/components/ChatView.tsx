@@ -73,6 +73,7 @@ import {
   derivePendingUserInputs,
   derivePhase,
   deriveTimelineEntries,
+  deriveActiveWorkStartedAt,
   deriveActivePlanState,
   findLatestProposedPlan,
   type PendingApproval,
@@ -104,6 +105,7 @@ import {
   buildPlanImplementationThreadTitle,
   buildPlanImplementationPrompt,
   buildProposedPlanMarkdownFilename,
+  downloadPlanAsTextFile,
   proposedPlanTitle,
   resolvePlanFollowUpSubmission,
 } from "../proposedPlan";
@@ -127,6 +129,7 @@ import {
   summarizeTurnDiffStats,
   type TurnDiffTreeNode,
 } from "../lib/turnDiffTree";
+import BranchToolbar from "./BranchToolbar";
 import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
 import GitActionsControl from "./GitActionsControl";
 import { useBranchToolbar } from "./useBranchToolbar";
@@ -138,6 +141,7 @@ import {
   shortcutLabelForCommand,
 } from "../keybindings";
 import ChatMarkdown from "./ChatMarkdown";
+import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import {
@@ -152,6 +156,7 @@ import {
   DiffIcon,
   EllipsisIcon,
   FolderClosedIcon,
+  ListTodoIcon,
   LockIcon,
   LockOpenIcon,
   Undo2Icon,
@@ -238,6 +243,29 @@ import { estimateTimelineMessageHeight } from "./timelineHeight";
 function formatMessageMeta(createdAt: string, duration: string | null): string {
   if (!duration) return formatTimestamp(createdAt);
   return `${formatTimestamp(createdAt)} • ${duration}`;
+}
+
+function formatWorkingTimer(startIso: string, endIso: string): string | null {
+  const startedAtMs = Date.parse(startIso);
+  const endedAtMs = Date.parse(endIso);
+  if (!Number.isFinite(startedAtMs) || !Number.isFinite(endedAtMs)) {
+    return null;
+  }
+
+  const elapsedSeconds = Math.max(0, Math.floor((endedAtMs - startedAtMs) / 1000));
+  if (elapsedSeconds < 60) {
+    return `${elapsedSeconds}s`;
+  }
+
+  const hours = Math.floor(elapsedSeconds / 3600);
+  const minutes = Math.floor((elapsedSeconds % 3600) / 60);
+  const seconds = elapsedSeconds % 60;
+
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
 const LAST_EDITOR_KEY = "t3code:last-editor";
@@ -429,11 +457,32 @@ function SubagentCard({
           )}
         </button>
 
-        {/* Summary preview (collapsed only) */}
-        {subagent.summary && !expanded && (
-          <p className="mt-1 truncate pl-6 text-[11px] leading-relaxed text-muted-foreground/40">
-            {subagent.summary}
-          </p>
+        {/* Activity preview (collapsed only) — last 3 actions */}
+        {!expanded && (hasChildren || subagent.summary) && (
+          <div className="mt-1.5 space-y-px pl-6">
+            {subagent.childActivities.slice(-3).map((child, i, arr) => (
+              <p
+                key={`preview-${child.id}`}
+                className={`truncate text-[11px] leading-relaxed ${workToneClass(child.tone)}`}
+                style={{ opacity: 0.25 + (0.75 * (i + 1)) / arr.length }}
+              >
+                {child.label}
+                {child.detail && (
+                  <span
+                    className="ml-1.5 inline-block max-w-[40ch] truncate align-bottom font-mono text-[11px] opacity-50"
+                    title={child.detail}
+                  >
+                    {child.detail}
+                  </span>
+                )}
+              </p>
+            ))}
+            {subagent.summary && subagent.childActivities.length === 0 && (
+              <p className="truncate text-[11px] leading-relaxed text-muted-foreground/40">
+                {subagent.summary}
+              </p>
+            )}
+          </div>
         )}
 
         {/* Expandable children */}
@@ -867,6 +916,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   } | null>(null);
   const queuedMessageRef = useRef(queuedMessage);
   queuedMessageRef.current = queuedMessage;
+  const [sendStartedAt, setSendStartedAt] = useState<string | null>(null);
   const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
   const [respondingRequestIds, setRespondingRequestIds] = useState<ApprovalRequestId[]>([]);
@@ -879,6 +929,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({});
   const [expandedWorkGroups, setExpandedWorkGroups] = useState<Record<string, boolean>>({});
+  const [planSidebarOpen, setPlanSidebarOpen] = useState(false);
+  // Tracks whether the user explicitly dismissed the sidebar for the active turn.
+  const planSidebarDismissedForTurnRef = useRef<string | null>(null);
+  // When set, the thread-change reset effect will open the sidebar instead of closing it.
+  // Used by "Implement in new thread" to carry the sidebar-open intent across navigation.
+  const planSidebarOpenOnNextThreadRef = useRef(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
   const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<string | null>(null);
@@ -984,11 +1040,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     composerDraft.interactionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
   const isServerThread = serverThread !== undefined;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
-  const diffSearch = useMemo(
-    () => parseDiffRouteSearch(rawSearch as Record<string, unknown>),
-    [rawSearch],
-  );
-  const diffOpen = diffSearch.diff === "1";
+  const diffOpen = rawSearch.diff === "1";
   const activeThreadId = activeThread?.id ?? null;
   const activeLatestTurn = activeThread?.latestTurn ?? null;
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
@@ -1074,7 +1126,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
     if (selectedProvider === "claudeCode") {
       const claudeOptions = {
-        ...(supportsReasoningEffort && selectedEffort ? { effort: selectedEffort } : {}),
+        ...(supportsReasoningEffort && selectedEffort
+          ? { effort: selectedEffort as "high" | "medium" | "low" }
+          : {}),
       };
       return Object.keys(claudeOptions).length > 0 ? { claudeCode: claudeOptions } : undefined;
     }
@@ -1094,6 +1148,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
       selectedCursorModelCapabilities.supportsFast ||
       selectedCursorModelCapabilities.supportsThinking),
   );
+  const providerOptionsForDispatch = useMemo(() => {
+    if (!settings.codexBinaryPath && !settings.codexHomePath) {
+      return undefined;
+    }
+    return {
+      codex: {
+        ...(settings.codexBinaryPath ? { binaryPath: settings.codexBinaryPath } : {}),
+        ...(settings.codexHomePath ? { homePath: settings.codexHomePath } : {}),
+      },
+    };
+  }, [settings.codexBinaryPath, settings.codexHomePath]);
   const selectedModelForPicker =
     selectedProvider === "cursor" && selectedCursorModel
       ? selectedCursorModel.family
@@ -1137,6 +1202,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const isPreparingWorktree = sendPhase === "preparing-worktree";
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
   const nowIso = new Date(nowTick).toISOString();
+  const activeWorkStartedAt = deriveActiveWorkStartedAt(
+    activeLatestTurn,
+    activeThread?.session ?? null,
+    sendStartedAt,
+  );
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
   // When the turn is settled (not actively running), show activities from ALL turns
   // so tool calls and history are preserved after a thread finishes.
@@ -1962,6 +2032,36 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [activeProject, persistProjectScripts],
   );
+  const deleteProjectScript = useCallback(
+    async (scriptId: string) => {
+      if (!activeProject) return;
+      const nextScripts = activeProject.scripts.filter((script) => script.id !== scriptId);
+
+      const deletedName = activeProject.scripts.find((s) => s.id === scriptId)?.name;
+
+      try {
+        await persistProjectScripts({
+          projectId: activeProject.id,
+          projectCwd: activeProject.cwd,
+          previousScripts: activeProject.scripts,
+          nextScripts,
+          keybinding: null,
+          keybindingCommand: commandForProjectScript(scriptId),
+        });
+        toastManager.add({
+          type: "success",
+          title: `Deleted action "${deletedName ?? "Unknown"}"`,
+        });
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Could not delete action",
+          description: error instanceof Error ? error.message : "An unexpected error occurred.",
+        });
+      }
+    },
+    [activeProject, persistProjectScripts],
+  );
 
   const handleRuntimeModeChange = useCallback(
     (mode: RuntimeMode) => {
@@ -2252,7 +2352,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   useEffect(() => {
     setExpandedWorkGroups({});
+    if (planSidebarOpenOnNextThreadRef.current) {
+      planSidebarOpenOnNextThreadRef.current = false;
+      setPlanSidebarOpen(true);
+    } else {
+      setPlanSidebarOpen(false);
+    }
+    planSidebarDismissedForTurnRef.current = null;
   }, [activeThread?.id]);
+
+
 
   useEffect(() => {
     if (!composerMenuOpen) {
@@ -2333,6 +2442,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
       return null;
     });
+    setSendStartedAt(null);
     setComposerHighlightedItemId(null);
     setComposerCursor(promptRef.current.length);
     setComposerTrigger(detectComposerTrigger(promptRef.current, promptRef.current.length));
@@ -2498,6 +2608,37 @@ export default function ChatView({ threadId }: ChatViewProps) {
       window.clearInterval(timer);
     };
   }, [phase]);
+
+  const beginSendPhase = useCallback((nextPhase: Exclude<SendPhase, "idle">) => {
+    setSendStartedAt((current) => current ?? new Date().toISOString());
+    setSendPhase(nextPhase);
+  }, []);
+
+  const resetSendPhase = useCallback(() => {
+    setSendPhase("idle");
+    setSendStartedAt(null);
+  }, []);
+
+  useEffect(() => {
+    if (sendPhase === "idle") {
+      return;
+    }
+    if (
+      phase === "running" ||
+      activePendingApproval !== null ||
+      activePendingUserInput !== null ||
+      activeThread?.error
+    ) {
+      resetSendPhase();
+    }
+  }, [
+    activePendingApproval,
+    activePendingUserInput,
+    activeThread?.error,
+    phase,
+    resetSendPhase,
+    sendPhase,
+  ]);
 
   useEffect(() => {
     if (!activeThreadId) return;
@@ -2838,7 +2979,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
 
     sendInFlightRef.current = true;
-    setSendPhase(baseBranchForWorktree ? "preparing-worktree" : "sending-turn");
+    beginSendPhase(baseBranchForWorktree ? "preparing-worktree" : "sending-turn");
 
     const composerImagesSnapshot = [...composerImages];
     const messageIdForSend = newMessageId();
@@ -2889,7 +3030,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     await (async () => {
       // On first message: lock in branch + create worktree if needed.
       if (baseBranchForWorktree) {
-        setSendPhase("preparing-worktree");
+        beginSendPhase("preparing-worktree");
         const newBranch = buildTemporaryWorktreeBranchName();
         const result = await createWorktreeMutation.mutateAsync({
           cwd: activeProject.cwd,
@@ -2994,9 +3135,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
         });
       }
 
-      setSendPhase("sending-turn");
+      beginSendPhase("sending-turn");
       const turnAttachments = await turnAttachmentsPromise;
-      // @ts-expect-error ProviderEffort type mismatch with claudeCode effort options
       await api.orchestration.dispatchCommand({
         type: "thread.turn.start",
         commandId: newCommandId(),
@@ -3011,6 +3151,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
         serviceTier: selectedServiceTier,
         ...(selectedModelOptionsForDispatch
           ? { modelOptions: selectedModelOptionsForDispatch }
+          : {}),
+        ...(providerOptionsForDispatch
+          ? { providerOptions: providerOptionsForDispatch }
           : {}),
         provider: selectedProvider,
         assistantDeliveryMode: settings.enableAssistantStreaming ? "streaming" : "buffered",
@@ -3057,7 +3200,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
       );
     });
     sendInFlightRef.current = false;
-    setSendPhase("idle");
+    if (!turnStartSucceeded) {
+      resetSendPhase();
+    }
   };
 
   const onInterrupt = async () => {
@@ -3203,6 +3348,23 @@ export default function ChatView({ threadId }: ChatViewProps) {
     ],
   );
 
+  const onAdvanceActivePendingUserInput = useCallback(() => {
+    if (!activePendingUserInput) {
+      return;
+    }
+    const currentAnswers =
+      pendingUserInputAnswersByRequestId[activePendingUserInput.requestId] ?? {};
+    const nextIndex = findFirstUnansweredPendingUserInputQuestionIndex(
+      activePendingUserInput.questions,
+      currentAnswers,
+    );
+    setActivePendingUserInputQuestionIndex(nextIndex);
+  }, [
+    activePendingUserInput,
+    pendingUserInputAnswersByRequestId,
+    setActivePendingUserInputQuestionIndex,
+  ]);
+
   const onChangeActivePendingUserInputCustomAnswer = useCallback(
     (questionId: string, value: string, nextCursor: number, cursorAdjacentToMention: boolean) => {
       if (!activePendingUserInput) {
@@ -3293,7 +3455,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       const messageCreatedAt = new Date().toISOString();
 
       sendInFlightRef.current = true;
-      setSendPhase("sending-turn");
+      beginSendPhase("sending-turn");
       setThreadError(threadIdForSend, null);
       setOptimisticUserMessages((existing) => [
         ...existing,
@@ -3321,7 +3483,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
         // while the same-thread implementation turn is starting.
         setComposerDraftInteractionMode(threadIdForSend, nextInteractionMode);
 
-        // @ts-expect-error ProviderEffort type mismatch with claudeCode effort options
         await api.orchestration.dispatchCommand({
           type: "thread.turn.start",
           commandId: newCommandId(),
@@ -3337,13 +3498,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
           ...(selectedModelOptionsForDispatch
             ? { modelOptions: selectedModelOptionsForDispatch }
             : {}),
+          ...(providerOptionsForDispatch
+            ? { providerOptions: providerOptionsForDispatch }
+            : {}),
           assistantDeliveryMode: settings.enableAssistantStreaming ? "streaming" : "buffered",
           runtimeMode,
           interactionMode: nextInteractionMode,
           createdAt: messageCreatedAt,
         });
+        // Optimistically open the plan sidebar when implementing (not refining).
+        // "default" mode here means the agent is executing the plan, which produces
+        // step-tracking activities that the sidebar will display.
+        if (nextInteractionMode === "default") {
+          planSidebarDismissedForTurnRef.current = null;
+          setPlanSidebarOpen(true);
+        }
         sendInFlightRef.current = false;
-        setSendPhase("idle");
       } catch (err) {
         setOptimisticUserMessages((existing) =>
           existing.filter((message) => message.id !== messageIdForSend),
@@ -3353,19 +3523,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
           err instanceof Error ? err.message : "Failed to send plan follow-up.",
         );
         sendInFlightRef.current = false;
-        setSendPhase("idle");
+        resetSendPhase();
       }
     },
     [
       activeThread,
+      beginSendPhase,
       forceStickToBottom,
       isConnecting,
       isSendBusy,
       isServerThread,
       persistThreadSettingsForNextTurn,
+      resetSendPhase,
       runtimeMode,
       selectedModel,
       selectedModelOptionsForDispatch,
+      providerOptionsForDispatch,
       selectedProvider,
       setComposerDraftInteractionMode,
       setThreadError,
@@ -3400,10 +3573,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
       DEFAULT_MODEL_BY_PROVIDER.codex;
 
     sendInFlightRef.current = true;
-    setSendPhase("sending-turn");
+    beginSendPhase("sending-turn");
     const finish = () => {
       sendInFlightRef.current = false;
-      setSendPhase("idle");
+      resetSendPhase();
     };
 
     await api.orchestration
@@ -3420,9 +3593,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
         worktreePath: activeThread.worktreePath,
         createdAt,
       })
-      .then(() =>
-        // @ts-expect-error ProviderEffort type mismatch with claudeCode effort options
-        api.orchestration.dispatchCommand({
+      .then(() => {
+        return api.orchestration.dispatchCommand({
           type: "thread.turn.start",
           commandId: newCommandId(),
           threadId: nextThreadId,
@@ -3437,15 +3609,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
           ...(selectedModelOptionsForDispatch
             ? { modelOptions: selectedModelOptionsForDispatch }
             : {}),
+          ...(providerOptionsForDispatch
+            ? { providerOptions: providerOptionsForDispatch }
+            : {}),
           assistantDeliveryMode: settings.enableAssistantStreaming ? "streaming" : "buffered",
           runtimeMode,
           interactionMode: "default",
           createdAt,
-        }),
-      )
+        });
+      })
       .then(() => api.orchestration.getSnapshot())
       .then((snapshot) => {
         syncServerReadModel(snapshot);
+        // Signal that the plan sidebar should open on the new thread.
+        planSidebarOpenOnNextThreadRef.current = true;
         return navigate({
           to: "/$threadId",
           params: { threadId: nextThreadId },
@@ -3477,13 +3654,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
     activeProject,
     activeProposedPlan,
     activeThread,
+    beginSendPhase,
     isConnecting,
     isSendBusy,
     isServerThread,
     navigate,
+    resetSendPhase,
     runtimeMode,
     selectedModel,
     selectedModelOptionsForDispatch,
+    providerOptionsForDispatch,
     selectedProvider,
     settings.enableAssistantStreaming,
     syncServerReadModel,
@@ -3861,6 +4041,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           activeThreadId={activeThread.id}
           activeThreadTitle={activeThread.title}
           activeProjectName={activeProject?.name}
+          isGitRepo={isGitRepo}
           openInCwd={activeThread.worktreePath ?? activeProject?.cwd ?? null}
           activeProjectScripts={activeProject?.scripts}
           preferredScriptId={
@@ -3876,6 +4057,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           }}
           onAddProjectScript={saveProjectScript}
           onUpdateProjectScript={updateProjectScript}
+          onDeleteProjectScript={deleteProjectScript}
           onToggleDiff={onToggleDiff}
         />
       </header>
@@ -3893,13 +4075,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
       {/* Error banner */}
       <ProviderHealthBanner status={activeProviderStatus} />
-      <ThreadErrorBanner error={activeThread.error} />
+      <ThreadErrorBanner
+        error={activeThread.error}
+        onDismiss={() => setThreadError(activeThread.id, null)}
+      />
       <PendingApprovalsPanel
         pendingApprovals={pendingApprovals}
         respondingRequestIds={respondingRequestIds}
         onRespondToApproval={onRespondToApproval}
       />
       <PlanModePanel activePlan={activePlan} />
+      {/* Main content area with optional plan sidebar */}
+      <div className="flex min-h-0 flex-1">
+        {/* Chat column */}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
 
       {/* Messages */}
       <div
@@ -3972,6 +4161,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
                 <ComposerPendingApprovalPanel
                   approval={activePendingApproval}
                   pendingCount={pendingApprovals.length}
+                />
+              </div>
+            ) : pendingUserInputs.length > 0 ? (
+              <div className="rounded-t-[19px] border-b border-border/65 bg-muted/20">
+                <ComposerPendingUserInputPanel
+                  pendingUserInputs={pendingUserInputs}
+                  respondingRequestIds={respondingUserInputRequestIds}
+                  answers={activePendingDraftAnswers}
+                  questionIndex={activePendingQuestionIndex}
+                  onSelectOption={onSelectActivePendingUserInputOption}
+                  onAdvance={onAdvanceActivePendingUserInput}
                 />
               </div>
             ) : showPlanFollowUpPrompt && activeProposedPlan ? (
@@ -4257,6 +4457,43 @@ export default function ChatView({ threadId }: ChatViewProps) {
                       <McpPanel threadId={activeThreadId} />
                     </>
                   )}
+
+                  {/* Plan sidebar toggle */}
+                  {(activePlan || activeProposedPlan || planSidebarOpen) ? (
+                    <>
+                      <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
+                      <Button
+                        variant="ghost"
+                        className={cn(
+                          "shrink-0 whitespace-nowrap px-2 sm:px-3",
+                          planSidebarOpen
+                            ? "text-blue-400 hover:text-blue-300"
+                            : "text-muted-foreground/70 hover:text-foreground/80",
+                        )}
+                        size="sm"
+                        type="button"
+                        onClick={() => {
+                          setPlanSidebarOpen((open) => {
+                            if (open) {
+                              // Closing: track dismissal for current turn
+                              const turnKey = activePlan?.turnId ?? activeProposedPlan?.turnId ?? null;
+                              if (turnKey) {
+                                planSidebarDismissedForTurnRef.current = turnKey;
+                              }
+                            } else {
+                              // Re-opening: clear dismissal tracking
+                              planSidebarDismissedForTurnRef.current = null;
+                            }
+                            return !open;
+                          });
+                        }}
+                        title={planSidebarOpen ? "Hide plan sidebar" : "Show plan sidebar"}
+                      >
+                        <ListTodoIcon />
+                        <span className="sr-only sm:not-sr-only">Plan</span>
+                      </Button>
+                    </>
+                  ) : null}
                 </div>
 
                 {/* Right side: send / stop button */}
@@ -4408,6 +4645,35 @@ export default function ChatView({ threadId }: ChatViewProps) {
         </form>
       </div>
 
+        </div>{/* end chat column */}
+
+        {/* Plan sidebar */}
+        {planSidebarOpen ? (
+          <PlanSidebar
+            activePlan={activePlan}
+            activeProposedPlan={activeProposedPlan}
+            markdownCwd={gitCwd ?? undefined}
+            workspaceRoot={activeProject?.cwd ?? undefined}
+            onClose={() => {
+              setPlanSidebarOpen(false);
+              // Track that the user explicitly dismissed for this turn so auto-open won't fight them.
+              const turnKey = activePlan?.turnId ?? activeProposedPlan?.turnId ?? null;
+              if (turnKey) {
+                planSidebarDismissedForTurnRef.current = turnKey;
+              }
+            }}
+          />
+        ) : null}
+      </div>{/* end horizontal flex container */}
+
+      {isGitRepo && (
+        <BranchToolbar
+          threadId={activeThread.id}
+          envLocked={envLocked}
+          onComposerFocusRequest={scheduleComposerFocus}
+        />
+      )}
+
       {(() => {
         if (!terminalState.terminalOpen || !activeProject) {
           return null;
@@ -4511,6 +4777,7 @@ interface ChatHeaderProps {
   activeThreadId: ThreadId;
   activeThreadTitle: string;
   activeProjectName: string | undefined;
+  isGitRepo: boolean;
   openInCwd: string | null;
   activeProjectScripts: ProjectScript[] | undefined;
   preferredScriptId: string | null;
@@ -4522,6 +4789,7 @@ interface ChatHeaderProps {
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
+  onDeleteProjectScript: (scriptId: string) => Promise<void>;
   onToggleDiff: () => void;
 }
 
@@ -4529,6 +4797,7 @@ const ChatHeader = memo(function ChatHeader({
   activeThreadId,
   activeThreadTitle,
   activeProjectName,
+  isGitRepo,
   openInCwd,
   activeProjectScripts,
   preferredScriptId,
@@ -4540,6 +4809,7 @@ const ChatHeader = memo(function ChatHeader({
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
+  onDeleteProjectScript,
   onToggleDiff,
 }: ChatHeaderProps) {
   return (
@@ -4557,6 +4827,11 @@ const ChatHeader = memo(function ChatHeader({
             {activeProjectName}
           </Badge>
         )}
+        {activeProjectName && !isGitRepo && (
+          <Badge variant="outline" className="shrink-0 text-[10px] text-amber-700">
+            No Git
+          </Badge>
+        )}
       </div>
       <div className="@container/header-actions flex min-w-0 flex-1 items-center justify-end gap-2 @sm/header-actions:gap-3">
         {activeProjectScripts && (
@@ -4567,6 +4842,7 @@ const ChatHeader = memo(function ChatHeader({
             onRunScript={onRunProjectScript}
             onAddScript={onAddProjectScript}
             onUpdateScript={onUpdateProjectScript}
+            onDeleteScript={onDeleteProjectScript}
           />
         )}
         {activeProjectName && (
@@ -4587,15 +4863,18 @@ const ChatHeader = memo(function ChatHeader({
                 aria-label="Toggle diff panel"
                 variant="outline"
                 size="xs"
+                disabled={!isGitRepo}
               >
                 <DiffIcon className="size-3" />
               </Toggle>
             }
           />
           <TooltipPopup side="bottom">
-            {diffToggleShortcutLabel
-              ? `Toggle diff panel (${diffToggleShortcutLabel})`
-              : "Toggle diff panel"}
+            {!isGitRepo
+              ? "Diff panel is unavailable because this project is not a git repository."
+              : diffToggleShortcutLabel
+                ? `Toggle diff panel (${diffToggleShortcutLabel})`
+                : "Toggle diff panel"}
           </TooltipPopup>
         </Tooltip>
       </div>
@@ -4603,7 +4882,13 @@ const ChatHeader = memo(function ChatHeader({
   );
 });
 
-const ThreadErrorBanner = memo(function ThreadErrorBanner({ error }: { error: string | null }) {
+const ThreadErrorBanner = memo(function ThreadErrorBanner({
+  error,
+  onDismiss,
+}: {
+  error: string | null;
+  onDismiss?: () => void;
+}) {
   if (!error) return null;
   return (
     <div className="pt-3 mx-auto max-w-3xl">
@@ -4612,6 +4897,18 @@ const ThreadErrorBanner = memo(function ThreadErrorBanner({ error }: { error: st
         <AlertDescription className="line-clamp-3" title={error}>
           {error}
         </AlertDescription>
+        {onDismiss && (
+          <AlertAction>
+            <button
+              type="button"
+              aria-label="Dismiss error"
+              className="inline-flex size-6 items-center justify-center rounded-md text-destructive/60 transition-colors hover:text-destructive"
+              onClick={onDismiss}
+            >
+              <XIcon className="size-3.5" />
+            </button>
+          </AlertAction>
+        )}
       </Alert>
     </div>
   );
@@ -4853,6 +5150,182 @@ const PlanModePanel = memo(function PlanModePanel({ activePlan }: PlanModePanelP
   );
 });
 
+interface PendingUserInputPanelProps {
+  pendingUserInputs: PendingUserInput[];
+  respondingRequestIds: ApprovalRequestId[];
+  answers: Record<string, PendingUserInputDraftAnswer>;
+  questionIndex: number;
+  onSelectOption: (questionId: string, optionLabel: string) => void;
+  onAdvance: () => void;
+}
+
+const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPanel({
+  pendingUserInputs,
+  respondingRequestIds,
+  answers,
+  questionIndex,
+  onSelectOption,
+  onAdvance,
+}: PendingUserInputPanelProps) {
+  if (pendingUserInputs.length === 0) return null;
+  const activePrompt = pendingUserInputs[0];
+  if (!activePrompt) return null;
+
+  return (
+    <ComposerPendingUserInputCard
+      key={activePrompt.requestId}
+      prompt={activePrompt}
+      isResponding={respondingRequestIds.includes(activePrompt.requestId)}
+      answers={answers}
+      questionIndex={questionIndex}
+      onSelectOption={onSelectOption}
+      onAdvance={onAdvance}
+    />
+  );
+});
+
+const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard({
+  prompt,
+  isResponding,
+  answers,
+  questionIndex,
+  onSelectOption,
+  onAdvance,
+}: {
+  prompt: PendingUserInput;
+  isResponding: boolean;
+  answers: Record<string, PendingUserInputDraftAnswer>;
+  questionIndex: number;
+  onSelectOption: (questionId: string, optionLabel: string) => void;
+  onAdvance: () => void;
+}) {
+  const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
+  const activeQuestion = progress.activeQuestion;
+  const autoAdvanceTimerRef = useRef<number | null>(null);
+
+  // Clear auto-advance timer on unmount
+  useEffect(() => {
+    return () => {
+      if (autoAdvanceTimerRef.current !== null) {
+        window.clearTimeout(autoAdvanceTimerRef.current);
+      }
+    };
+  }, []);
+
+  const selectOptionAndAutoAdvance = useCallback(
+    (questionId: string, optionLabel: string) => {
+      onSelectOption(questionId, optionLabel);
+      if (autoAdvanceTimerRef.current !== null) {
+        window.clearTimeout(autoAdvanceTimerRef.current);
+      }
+      autoAdvanceTimerRef.current = window.setTimeout(() => {
+        autoAdvanceTimerRef.current = null;
+        onAdvance();
+      }, 200);
+    },
+    [onSelectOption, onAdvance],
+  );
+
+  // Keyboard shortcut: number keys 1-9 select corresponding option and auto-advance.
+  // Works even when the Lexical composer (contenteditable) has focus — the composer
+  // doubles as a custom-answer field during user input, and when it's empty the digit
+  // keys should pick options instead of typing into the editor.
+  useEffect(() => {
+    if (!activeQuestion || isResponding) return;
+    const handler = (event: globalThis.KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement
+      ) {
+        return;
+      }
+      // If the user has started typing a custom answer in the contenteditable
+      // composer, let digit keys pass through so they can type numbers.
+      if (target instanceof HTMLElement && target.isContentEditable) {
+        const hasCustomText = progress.customAnswer.length > 0;
+        if (hasCustomText) return;
+      }
+      const digit = Number.parseInt(event.key, 10);
+      if (Number.isNaN(digit) || digit < 1 || digit > 9) return;
+      const optionIndex = digit - 1;
+      if (optionIndex >= activeQuestion.options.length) return;
+      const option = activeQuestion.options[optionIndex];
+      if (!option) return;
+      event.preventDefault();
+      selectOptionAndAutoAdvance(activeQuestion.id, option.label);
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [activeQuestion, isResponding, selectOptionAndAutoAdvance, progress.customAnswer.length]);
+
+  if (!activeQuestion) {
+    return null;
+  }
+
+  return (
+    <div className="px-4 py-3 sm:px-5">
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
+          {prompt.questions.length > 1 ? (
+            <span className="flex h-5 items-center rounded-md bg-muted/60 px-1.5 text-[10px] font-medium tabular-nums text-muted-foreground/60">
+              {questionIndex + 1}/{prompt.questions.length}
+            </span>
+          ) : null}
+          <span className="text-[11px] font-semibold tracking-widest text-muted-foreground/50 uppercase">
+            {activeQuestion.header}
+          </span>
+        </div>
+      </div>
+      <p className="mt-1.5 text-sm text-foreground/90">{activeQuestion.question}</p>
+      <div className="mt-3 space-y-1">
+        {activeQuestion.options.map((option, index) => {
+          const isSelected = progress.selectedOptionLabel === option.label;
+          const shortcutKey = index < 9 ? index + 1 : null;
+          return (
+            <button
+              key={`${activeQuestion.id}:${option.label}`}
+              type="button"
+              disabled={isResponding}
+              onClick={() => selectOptionAndAutoAdvance(activeQuestion.id, option.label)}
+              className={cn(
+                "group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left transition-all duration-150",
+                isSelected
+                  ? "border-blue-500/40 bg-blue-500/8 text-foreground"
+                  : "border-transparent bg-muted/20 text-foreground/80 hover:bg-muted/40 hover:border-border/40",
+                isResponding && "opacity-50 cursor-not-allowed",
+              )}
+            >
+              {shortcutKey !== null ? (
+                <kbd
+                  className={cn(
+                    "flex size-5 shrink-0 items-center justify-center rounded text-[11px] font-medium tabular-nums transition-colors duration-150",
+                    isSelected
+                      ? "bg-blue-500/20 text-blue-400"
+                      : "bg-muted/40 text-muted-foreground/50 group-hover:bg-muted/60 group-hover:text-muted-foreground/70",
+                  )}
+                >
+                  {shortcutKey}
+                </kbd>
+              ) : null}
+              <div className="min-w-0 flex-1">
+                <span className="text-sm font-medium">{option.label}</span>
+                {option.description && option.description !== option.label ? (
+                  <span className="ml-2 text-xs text-muted-foreground/50">{option.description}</span>
+                ) : null}
+              </div>
+              {isSelected ? (
+                <CheckIcon className="size-3.5 shrink-0 text-blue-400" />
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+});
+
 const ComposerPlanFollowUpBanner = memo(function ComposerPlanFollowUpBanner({
   planTitle,
 }: {
@@ -5059,7 +5532,7 @@ const ProposedPlanCard = memo(function ProposedPlanCard({
   const saveContents = normalizePlanMarkdownForExport(planMarkdown);
 
   const handleDownload = () => {
-    downloadTextFile(downloadFilename, saveContents);
+    downloadPlanAsTextFile(downloadFilename, saveContents);
   };
 
   const openSaveDialog = () => {
@@ -5644,7 +6117,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
       const row = rows[index];
       if (!row) return 96;
       if (row.kind === "work") return 112;
-      if (row.kind === "subagent") return 120;
+      if (row.kind === "subagent") return 160;
       if (row.kind === "user-input") return 250;
       if (row.kind === "proposed-plan") return estimateTimelineProposedPlanHeight(row.proposedPlan);
       if (row.kind === "working") return 40;
@@ -5745,23 +6218,43 @@ const MessagesTimeline = memo(function MessagesTimeline({
                 {visibleEntries.map((workEntry) => (
                   <div key={`work-row:${workEntry.id}`} className="flex items-start gap-2 py-0.5">
                     <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/30" />
-                    <p
-                      className={`py-[2px] text-[11px] leading-relaxed ${workToneClass(workEntry.tone)}`}
-                    >
-                      {workEntry.detail ? (
-                        <>
-                          {workEntry.label}
-                          <span
-                            className="ml-1.5 inline-block max-w-[70ch] truncate align-bottom font-mono text-[11px] opacity-60"
+                    <div className="min-w-0 flex-1 py-[2px]">
+                      <p className={`text-[11px] leading-relaxed ${workToneClass(workEntry.tone)}`}>
+                        {workEntry.label}
+                      </p>
+                      {workEntry.command && (
+                        <pre className="mt-1 overflow-x-auto rounded-md border border-border/70 bg-background/80 px-2 py-1 font-mono text-[11px] leading-relaxed text-foreground/80">
+                          {workEntry.command}
+                        </pre>
+                      )}
+                      {workEntry.changedFiles && workEntry.changedFiles.length > 0 && (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {workEntry.changedFiles.slice(0, 6).map((filePath) => (
+                            <span
+                              key={`${workEntry.id}:${filePath}`}
+                              className="rounded-md border border-border/70 bg-background/65 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground/85"
+                              title={filePath}
+                            >
+                              {filePath}
+                            </span>
+                          ))}
+                          {workEntry.changedFiles.length > 6 && (
+                            <span className="px-1 text-[10px] text-muted-foreground/65">
+                              +{workEntry.changedFiles.length - 6} more
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {workEntry.detail &&
+                        (!workEntry.command || workEntry.detail !== workEntry.command) && (
+                          <p
+                            className="mt-1 text-[11px] leading-relaxed text-muted-foreground/75"
                             title={workEntry.detail}
                           >
                             {workEntry.detail}
-                          </span>
-                        </>
-                      ) : (
-                        workEntry.label
-                      )}
-                    </p>
+                          </p>
+                        )}
+                    </div>
                   </div>
                 ))}
               </div>
