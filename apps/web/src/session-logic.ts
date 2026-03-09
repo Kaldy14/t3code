@@ -450,7 +450,7 @@ export function deriveWorkLogEntries(
         entry.command = command;
       }
       if (changedFiles.length > 0) {
-        entry.changedFiles = changedFiles;
+        entry.changedFiles = changedFiles.map(shortenAbsolutePath);
       }
       return entry;
     });
@@ -553,6 +553,35 @@ function asTrimmedString(value: unknown): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+/**
+ * Shorten an absolute file path to a project-relative form for display.
+ * Finds common root markers (/src/, /apps/, etc.) and strips the prefix.
+ * Falls back to the last 3 path segments for unrecognized layouts.
+ */
+function shortenAbsolutePath(filePath: string): string {
+  const markers = [
+    "/src/",
+    "/lib/",
+    "/packages/",
+    "/apps/",
+    "/test/",
+    "/tests/",
+    "/spec/",
+    "/scripts/",
+  ];
+  for (const marker of markers) {
+    const idx = filePath.indexOf(marker);
+    if (idx !== -1) {
+      return filePath.slice(idx + 1);
+    }
+  }
+  const segments = filePath.split("/").filter(Boolean);
+  if (segments.length > 3) {
+    return `…/${segments.slice(-3).join("/")}`;
+  }
+  return filePath;
+}
+
 function normalizeCommandValue(value: unknown): string | null {
   const direct = asTrimmedString(value);
   if (direct) {
@@ -614,6 +643,7 @@ function collectChangedFiles(
     return;
   }
 
+  pushChangedFile(target, seen, record.file_path);
   pushChangedFile(target, seen, record.path);
   pushChangedFile(target, seen, record.filePath);
   pushChangedFile(target, seen, record.relativePath);

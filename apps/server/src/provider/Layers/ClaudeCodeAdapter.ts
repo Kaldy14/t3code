@@ -120,6 +120,8 @@ interface ToolInFlight {
   detail?: string;
   /** Accumulated input_json_delta chunks for re-summarization at block stop. */
   inputJsonChunks: string[];
+  /** Initial tool input captured at content_block_start (may be partial). */
+  readonly initialInput: Record<string, unknown>;
 }
 
 interface ClaudeSessionContext {
@@ -284,32 +286,145 @@ function classifyRequestType(toolName: string): CanonicalRequestType {
     : "file_change_approval";
 }
 
-function summarizeToolRequest(toolName: string, input: Record<string, unknown>): string {
-  const commandValue = input.command ?? input.cmd;
-  const command = typeof commandValue === "string" ? commandValue : undefined;
-  if (command && command.trim().length > 0) {
-    return `${toolName}: ${command.trim().slice(0, 400)}`;
+/**
+ * Shorten an absolute file path to a project-relative form for display.
+ * Looks for common root markers (/src/, /apps/, etc.) and strips the prefix.
+ * Falls back to the last 3 path segments.
+ */
+function shortenAbsolutePath(filePath: string): string {
+  const markers = [
+    "/src/",
+    "/lib/",
+    "/packages/",
+    "/apps/",
+    "/test/",
+    "/tests/",
+    "/spec/",
+    "/scripts/",
+  ];
+  for (const marker of markers) {
+    const idx = filePath.indexOf(marker);
+    if (idx !== -1) {
+      return filePath.slice(idx + 1);
+    }
   }
-
-  const serialized = JSON.stringify(input);
-  if (serialized.length <= 400) {
-    return `${toolName}: ${serialized}`;
+  const segments = filePath.split("/").filter(Boolean);
+  if (segments.length > 3) {
+    return `…/${segments.slice(-3).join("/")}`;
   }
-  return `${toolName}: ${serialized.slice(0, 397)}...`;
+  return filePath;
 }
 
-function titleForTool(itemType: CanonicalItemType): string {
+function extractFirstFilePath(input: Record<string, unknown>): string | undefined {
+  for (const key of ["file_path", "filePath", "path", "filename"]) {
+    const value = input[key];
+    if (typeof value === "string" && value.length > 0) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Extract only small metadata fields from tool input (file paths, patterns, commands).
+ * Omits large string values (file content, old_string, new_string) to keep payloads small.
+ */
+function extractToolInputMeta(input: Record<string, unknown>): Record<string, unknown> {
+  const meta: Record<string, unknown> = {};
+  for (const key of [
+    "file_path",
+    "filePath",
+    "path",
+    "pattern",
+    "command",
+    "cmd",
+    "query",
+    "url",
+    "description",
+    "glob",
+    "type",
+    "output_mode",
+  ]) {
+    if (typeof input[key] === "string") {
+      meta[key] = (input[key] as string).slice(0, 500);
+    }
+  }
+  return meta;
+}
+
+function summarizeToolRequest(toolName: string, input: Record<string, unknown>): string {
+  // Commands: show the command text directly
+  const commandValue = input.command ?? input.cmd;
+  if (typeof commandValue === "string" && commandValue.trim().length > 0) {
+    return commandValue.trim().slice(0, 400);
+  }
+
+  // File path based tools: show a clean shortened path
+  const filePath = extractFirstFilePath(input);
+  if (filePath) {
+    const shortPath = shortenAbsolutePath(filePath);
+    // For search-like tools with a pattern, include it
+    const pattern = typeof input.pattern === "string" ? input.pattern : undefined;
+    if (pattern) {
+      return `"${pattern.slice(0, 80)}" in ${shortPath}`;
+    }
+    return shortPath;
+  }
+
+  // Pattern/query-based tools (Grep without a file path, Glob, WebSearch)
+  const pattern = input.pattern ?? input.query ?? input.search;
+  if (typeof pattern === "string") {
+    return `"${pattern.slice(0, 120)}"`;
+  }
+
+  // Agent/task tools: show the description
+  const description = input.description ?? input.prompt;
+  if (typeof description === "string") {
+    return description.slice(0, 200);
+  }
+
+  // URL-based tools
+  if (typeof input.url === "string") {
+    return input.url.slice(0, 200);
+  }
+
+  // Fallback: JSON summary (shorter limit than before)
+  const serialized = JSON.stringify(input);
+  if (serialized.length <= 200) {
+    return serialized;
+  }
+  return `${serialized.slice(0, 197)}...`;
+}
+
+function titleForTool(itemType: CanonicalItemType, toolName: string): string {
+  const lower = toolName.toLowerCase();
+  // Known Claude Code tools — use specific, human-readable names
+  if (lower === "edit" || lower === "multiedit") return "Edit";
+  if (lower === "write") return "Write";
+  if (lower === "read") return "Read";
+  if (lower === "grep") return "Search";
+  if (lower === "glob") return "Find files";
+  if (lower === "bash") return "Run command";
+  if (lower === "agent") return "Agent task";
+  if (lower === "websearch" || lower === "web_search") return "Web search";
+  if (lower === "webfetch" || lower === "web_fetch") return "Web fetch";
+  if (lower === "todowrite" || lower === "todo_write") return "Todo update";
+  if (lower === "notebookedit" || lower === "notebook_edit") return "Notebook edit";
+  if (lower === "skill") return "Skill";
+  if (lower === "toolsearch") return "Tool search";
+
+  // Fallback to category-based labels
   switch (itemType) {
     case "command_execution":
-      return "Command run";
+      return "Run command";
     case "file_change":
       return "File change";
     case "mcp_tool_call":
-      return "MCP tool call";
+      return toolName;
     case "dynamic_tool_call":
-      return "Tool call";
+      return toolName;
     default:
-      return "Item";
+      return "Tool";
   }
 }
 
@@ -1012,9 +1127,10 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
             itemId,
             itemType,
             toolName,
-            title: titleForTool(itemType),
+            title: titleForTool(itemType, toolName),
             detail,
             inputJsonChunks: [],
+            initialInput: toolInput,
           };
           context.inFlightTools.set(index, tool);
 
@@ -1059,15 +1175,18 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           }
           context.inFlightTools.delete(index);
 
-          // Re-summarize with the full accumulated tool input if available
+          // Re-summarize with the full accumulated tool input if available,
+          // falling back to the initial input captured at content_block_start.
+          let finalInput: Record<string, unknown> = tool.initialInput;
           if (tool.inputJsonChunks.length > 0) {
             try {
-              const fullInput = JSON.parse(tool.inputJsonChunks.join("")) as Record<string, unknown>;
-              tool.detail = summarizeToolRequest(tool.toolName, fullInput);
+              finalInput = JSON.parse(tool.inputJsonChunks.join("")) as Record<string, unknown>;
             } catch {
-              // Keep the original detail if JSON parsing fails
+              // Keep the initial input if JSON parsing fails
             }
           }
+          tool.detail = summarizeToolRequest(tool.toolName, finalInput);
+          const inputMeta = extractToolInputMeta(finalInput);
 
           const stamp = yield* makeEventStamp();
           yield* offerRuntimeEvent({
@@ -1083,6 +1202,10 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
               status: "completed",
               title: tool.title,
               ...(tool.detail ? { detail: tool.detail } : {}),
+              data: {
+                toolName: tool.toolName,
+                input: inputMeta,
+              },
             },
             providerRefs: {
               ...providerThreadRef(context),
