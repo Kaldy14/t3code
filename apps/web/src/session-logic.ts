@@ -745,6 +745,65 @@ export function deriveCurrentActivityStatus(
   return null;
 }
 
+/**
+ * Derives the last N human-readable activity status labels for the current turn.
+ * Used to show recent activity history inside the subagent card.
+ */
+export function deriveRecentActivityStatuses(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  latestTurnId: TurnId | undefined,
+  count = 3,
+): string[] {
+  if (!latestTurnId) return [];
+
+  const ordered = [...activities]
+    .filter((a) => a.turnId === latestTurnId)
+    .toSorted(compareActivitiesByOrder);
+
+  const result: string[] = [];
+  const seen = new Set<string>();
+
+  for (let i = ordered.length - 1; i >= 0 && result.length < count; i--) {
+    const activity = ordered[i];
+    if (!activity) continue;
+
+    const payload =
+      activity.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : null;
+    const detail = payload && typeof payload.detail === "string" ? payload.detail : undefined;
+    const itemType =
+      payload && typeof payload.itemType === "string" ? payload.itemType : undefined;
+
+    let label: string | null = null;
+    switch (activity.kind) {
+      case "tool.started":
+      case "tool.updated":
+        label = formatToolStatusLabel(itemType, activity.summary, detail);
+        break;
+      case "tool.completed":
+        label = formatToolStatusLabel(itemType, activity.summary, detail);
+        break;
+      case "task.progress":
+        label = detail ?? null;
+        break;
+      case "task.started":
+        label = detail ?? null;
+        break;
+      default:
+        continue;
+    }
+
+    if (label && !seen.has(label)) {
+      seen.add(label);
+      result.push(label);
+    }
+  }
+
+  // Reverse so oldest is first, newest is last (for progressive opacity)
+  return result.reverse();
+}
+
 const STATUS_LABEL_MAX_LENGTH = 80;
 
 function formatToolStatusLabel(

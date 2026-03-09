@@ -14,10 +14,11 @@ function shouldNotify(): boolean {
   return true;
 }
 
-function fireNotification(title: string, body: string, tag: string): void {
+function fireNotification(title: string, body: string, tag: string, onNavigate?: () => void): void {
   const n = new Notification(title, { body, tag });
   n.onclick = () => {
     window.focus();
+    onNavigate?.();
     n.close();
   };
   setTimeout(() => n.close(), 8_000);
@@ -46,11 +47,12 @@ function buildActivityNotification(
 export function dispatchActivityNotification(
   activity: OrchestrationThreadActivity,
   threadTitle: string,
+  onNavigate?: () => void,
 ): void {
   if (!shouldNotify()) return;
   const notification = buildActivityNotification(activity, threadTitle);
   if (!notification) return;
-  fireNotification(notification.title, notification.body, activity.turnId ?? activity.id);
+  fireNotification(notification.title, notification.body, activity.turnId ?? activity.id, onNavigate);
 }
 
 // ── Session-set notifications (turn finished) ────────────────────────
@@ -64,6 +66,7 @@ export function dispatchSessionSetNotification(
   threadTitle: string,
   status: OrchestrationSessionStatus,
   previousStatus: OrchestrationSessionStatus | null,
+  onNavigate?: () => void,
 ): void {
   if (!shouldNotify()) return;
   if (previousStatus !== "running") return;
@@ -83,5 +86,5 @@ export function dispatchSessionSetNotification(
       return;
   }
 
-  fireNotification(title, threadTitle, `session:${threadId}`);
+  fireNotification(title, threadTitle, `session:${threadId}`, onNavigate);
 }

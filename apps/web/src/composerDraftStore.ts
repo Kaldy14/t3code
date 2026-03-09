@@ -53,6 +53,7 @@ interface PersistedDraftThreadState {
   branch: string | null;
   worktreePath: string | null;
   envMode: DraftThreadEnvMode;
+  worktreeBranchName?: string | null;
 }
 
 interface PersistedComposerDraftStoreState {
@@ -82,6 +83,7 @@ export interface DraftThreadState {
   branch: string | null;
   worktreePath: string | null;
   envMode: DraftThreadEnvMode;
+  worktreeBranchName: string | null;
 }
 
 interface ProjectDraftThread extends DraftThreadState {
@@ -104,6 +106,7 @@ interface ComposerDraftStoreState {
       envMode?: DraftThreadEnvMode;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
+      worktreeBranchName?: string | null;
     },
   ) => void;
   setDraftThreadContext: (
@@ -116,6 +119,7 @@ interface ComposerDraftStoreState {
       envMode?: DraftThreadEnvMode;
       runtimeMode?: RuntimeMode;
       interactionMode?: ProviderInteractionMode;
+      worktreeBranchName?: string | null;
     },
   ) => void;
   clearProjectDraftThreadId: (projectId: ProjectId) => void;
@@ -139,6 +143,7 @@ interface ComposerDraftStoreState {
     threadId: ThreadId,
     attachments: PersistedComposerImageAttachment[],
   ) => void;
+  setWorktreeBranchName: (threadId: ThreadId, name: string | null) => void;
   clearComposerContent: (threadId: ThreadId) => void;
   clearThreadDraft: (threadId: ThreadId) => void;
 }
@@ -291,6 +296,7 @@ function normalizePersistedComposerDraftState(value: unknown): PersistedComposer
       if (typeof projectId !== "string" || projectId.length === 0) {
         continue;
       }
+      const rawWorktreeBranchName = candidateDraftThread.worktreeBranchName;
       draftThreadsByThreadId[threadId as ThreadId] = {
         projectId: projectId as ProjectId,
         createdAt:
@@ -310,6 +316,10 @@ function normalizePersistedComposerDraftState(value: unknown): PersistedComposer
         branch: typeof branch === "string" ? branch : null,
         worktreePath: normalizedWorktreePath,
         envMode: normalizeDraftThreadEnvMode(candidateDraftThread.envMode, normalizedWorktreePath),
+        worktreeBranchName:
+          typeof rawWorktreeBranchName === "string" && rawWorktreeBranchName.length > 0
+            ? rawWorktreeBranchName
+            : null,
       };
     }
   }
@@ -338,6 +348,7 @@ function normalizePersistedComposerDraftState(value: unknown): PersistedComposer
             branch: null,
             worktreePath: null,
             envMode: "local",
+            worktreeBranchName: null,
           };
         } else if (draftThreadsByThreadId[threadId as ThreadId]?.projectId !== projectId) {
           draftThreadsByThreadId[threadId as ThreadId] = {
@@ -561,6 +572,10 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             options?.worktreePath === undefined
               ? (existingThread?.worktreePath ?? null)
               : (options.worktreePath ?? null);
+          const nextWorktreeBranchName =
+            options?.worktreeBranchName === undefined
+              ? (existingThread?.worktreeBranchName ?? null)
+              : (options.worktreeBranchName ?? null);
           const nextDraftThread: DraftThreadState = {
             projectId,
             createdAt: options?.createdAt ?? existingThread?.createdAt ?? new Date().toISOString(),
@@ -577,6 +592,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             envMode:
               options?.envMode ??
               (nextWorktreePath ? "worktree" : (existingThread?.envMode ?? "local")),
+            worktreeBranchName: nextWorktreeBranchName,
           };
           const hasSameProjectMapping = previousThreadIdForProject === threadId;
           const hasSameDraftThread =
@@ -587,7 +603,8 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             existingThread.interactionMode === nextDraftThread.interactionMode &&
             existingThread.branch === nextDraftThread.branch &&
             existingThread.worktreePath === nextDraftThread.worktreePath &&
-            existingThread.envMode === nextDraftThread.envMode;
+            existingThread.envMode === nextDraftThread.envMode &&
+            existingThread.worktreeBranchName === nextDraftThread.worktreeBranchName;
           if (hasSameProjectMapping && hasSameDraftThread) {
             return state;
           }
@@ -633,6 +650,10 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           }
           const nextWorktreePath =
             options.worktreePath === undefined ? existing.worktreePath : (options.worktreePath ?? null);
+          const nextWorktreeBranchName =
+            options.worktreeBranchName === undefined
+              ? existing.worktreeBranchName
+              : (options.worktreeBranchName ?? null);
           const nextDraftThread: DraftThreadState = {
             projectId: nextProjectId,
             createdAt:
@@ -646,6 +667,7 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             envMode:
               options.envMode ??
               (nextWorktreePath ? "worktree" : (existing.envMode ?? "local")),
+            worktreeBranchName: nextWorktreeBranchName,
           };
           const isUnchanged =
             nextDraftThread.projectId === existing.projectId &&
@@ -654,7 +676,8 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             nextDraftThread.interactionMode === existing.interactionMode &&
             nextDraftThread.branch === existing.branch &&
             nextDraftThread.worktreePath === existing.worktreePath &&
-            nextDraftThread.envMode === existing.envMode;
+            nextDraftThread.envMode === existing.envMode &&
+            nextDraftThread.worktreeBranchName === existing.worktreeBranchName;
           if (isUnchanged) {
             return state;
           }
@@ -1102,6 +1125,27 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
           });
         });
       },
+      setWorktreeBranchName: (threadId, name) => {
+        if (threadId.length === 0) {
+          return;
+        }
+        set((state) => {
+          const existing = state.draftThreadsByThreadId[threadId];
+          if (!existing) {
+            return state;
+          }
+          const normalized = name && name.trim().length > 0 ? name.trim() : null;
+          if (existing.worktreeBranchName === normalized) {
+            return state;
+          }
+          return {
+            draftThreadsByThreadId: {
+              ...state.draftThreadsByThreadId,
+              [threadId]: { ...existing, worktreeBranchName: normalized },
+            },
+          };
+        });
+      },
       clearComposerContent: (threadId) => {
         if (threadId.length === 0) {
           return;
@@ -1223,10 +1267,19 @@ export const useComposerDraftStore = create<ComposerDraftStoreState>()(
             toHydratedThreadDraft(draft),
           ]),
         );
+        const draftThreadsByThreadId: Record<ThreadId, DraftThreadState> = {};
+        for (const [threadId, persisted] of Object.entries(
+          normalizedPersisted.draftThreadsByThreadId,
+        )) {
+          draftThreadsByThreadId[threadId as ThreadId] = {
+            ...persisted,
+            worktreeBranchName: persisted.worktreeBranchName ?? null,
+          };
+        }
         return {
           ...currentState,
           draftsByThreadId,
-          draftThreadsByThreadId: normalizedPersisted.draftThreadsByThreadId,
+          draftThreadsByThreadId,
           projectDraftThreadIdByProjectId: normalizedPersisted.projectDraftThreadIdByProjectId,
         };
       },

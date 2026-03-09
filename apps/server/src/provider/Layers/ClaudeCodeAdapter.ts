@@ -80,6 +80,8 @@ interface ClaudeTurnState {
   emittedTextDelta: boolean;
   fallbackAssistantText: string;
   lastBlockWasToolUse: boolean;
+  /** When true, the turn was started in plan mode and should emit a proposed plan on completion. */
+  readonly isPlanMode: boolean;
   /**
    * Context window occupancy from the latest parent-level API call.
    * Derived from `BetaMessage.usage` on `SDKAssistantMessage` where
@@ -969,6 +971,28 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           id: turnState.turnId,
           items: [...turnState.items],
         });
+
+        // When the turn was started in plan mode and completed successfully,
+        // emit a proposed-plan event so the ingestion pipeline creates a
+        // first-class proposed plan that the UI can present for review.
+        if (turnState.isPlanMode && status === "completed" && turnState.fallbackAssistantText.length > 0) {
+          const planStamp = yield* makeEventStamp();
+          yield* offerRuntimeEvent({
+            type: "turn.proposed.completed",
+            eventId: planStamp.eventId,
+            provider: PROVIDER,
+            createdAt: planStamp.createdAt,
+            threadId: context.internalThreadId,
+            turnId: turnState.turnId,
+            payload: {
+              planMarkdown: turnState.fallbackAssistantText,
+            },
+            providerRefs: {
+              ...providerThreadRef(context),
+              providerTurnId: turnState.turnId,
+            },
+          });
+        }
 
         const stamp = yield* makeEventStamp();
         yield* offerRuntimeEvent({
@@ -2218,6 +2242,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           emittedTextDelta: false,
           fallbackAssistantText: "",
           lastBlockWasToolUse: false,
+          isPlanMode: input.interactionMode === "plan",
         };
 
         const updatedAt = yield* nowIso;

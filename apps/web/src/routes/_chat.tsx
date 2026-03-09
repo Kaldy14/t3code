@@ -1,5 +1,7 @@
 import { Outlet, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useCallback, useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
 
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
 import ThreadSidebar from "../components/Sidebar";
@@ -7,8 +9,13 @@ import { Sidebar, SidebarProvider } from "~/components/ui/sidebar";
 import { useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { projectTerminalThreadId } from "../types";
+import { isThreadSearchShortcut } from "../keybindings";
+import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 
 const ProjectTerminalDrawer = lazy(() => import("../components/ProjectTerminalDrawer"));
+const ThreadSearchDialog = lazy(() => import("../components/ThreadSearchDialog"));
+
+const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
 
 function ProjectTerminalDrawers() {
   const projects = useStore((s) => s.projects);
@@ -46,6 +53,11 @@ function ProjectTerminalDrawers() {
 
 function ChatRouteLayout() {
   const navigate = useNavigate();
+  const [searchOpen, setSearchOpen] = useState(false);
+  const { data: keybindings = EMPTY_KEYBINDINGS } = useQuery({
+    ...serverConfigQueryOptions(),
+    select: (config) => config.keybindings,
+  });
 
   useEffect(() => {
     const onMenuAction = window.desktopBridge?.onMenuAction;
@@ -63,6 +75,19 @@ function ChatRouteLayout() {
     };
   }, [navigate]);
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (isThreadSearchShortcut(event, keybindings)) {
+        event.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [keybindings]);
+
+  const handleSearchClick = useCallback(() => setSearchOpen(true), []);
+
   return (
     <SidebarProvider defaultOpen>
       <Sidebar
@@ -70,7 +95,7 @@ function ChatRouteLayout() {
         collapsible="offcanvas"
         className="border-r border-border bg-card text-foreground"
       >
-        <ThreadSidebar />
+        <ThreadSidebar onSearchClick={handleSearchClick} />
       </Sidebar>
       <DiffWorkerPoolProvider>
         <div className="flex h-dvh min-h-0 w-full flex-col">
@@ -80,6 +105,9 @@ function ChatRouteLayout() {
           <ProjectTerminalDrawers />
         </div>
       </DiffWorkerPoolProvider>
+      <Suspense fallback={null}>
+        <ThreadSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
+      </Suspense>
     </SidebarProvider>
   );
 }

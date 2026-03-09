@@ -82,6 +82,7 @@ import {
   deriveWorkLogEntries,
   deriveSubagentGroups,
   deriveCurrentActivityStatus,
+  deriveRecentActivityStatuses,
   hasToolActivityForTurn,
   isLatestTurnSettled,
   formatElapsed,
@@ -129,7 +130,7 @@ import {
   summarizeTurnDiffStats,
   type TurnDiffTreeNode,
 } from "../lib/turnDiffTree";
-import BranchToolbar from "./BranchToolbar";
+
 import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
 import GitActionsControl from "./GitActionsControl";
 import { useBranchToolbar } from "./useBranchToolbar";
@@ -286,7 +287,8 @@ const EMPTY_SLASH_COMMANDS: readonly string[] = [];
 const COMPOSER_PATH_QUERY_DEBOUNCE_MS = 120;
 const SCRIPT_TERMINAL_COLS = 120;
 const SCRIPT_TERMINAL_ROWS = 30;
-const WORKTREE_BRANCH_PREFIX = "t3code";
+const WORKTREE_BRANCH_PREFIX = "feature";
+const WORKTREE_BRANCH_DEFAULT_TEMPLATE = "feature/ITE-";
 
 function readLastInvokedScriptByProjectFromStorage(): Record<string, string> {
   const stored = localStorage.getItem(LAST_INVOKED_SCRIPT_BY_PROJECT_KEY);
@@ -349,9 +351,11 @@ function normalizePlanMarkdownForExport(planMarkdown: string): string {
 function SubagentCard({
   subagent,
   nowIso,
+  recentActivityStatuses = [],
 }: {
   subagent: SubagentGroup;
   nowIso: string;
+  recentActivityStatuses?: string[];
 }) {
   const [expanded, setExpanded] = useState(false);
   const isRunning = subagent.status === "running";
@@ -479,32 +483,57 @@ function SubagentCard({
         </button>
 
         {/* Activity preview (collapsed only) — last 3 actions */}
-        {!expanded && (hasChildren || subagent.summary) && (
-          <div className="mt-1.5 space-y-px pl-6">
-            {subagent.childActivities.slice(-3).map((child, i, arr) => (
-              <p
-                key={`preview-${child.id}`}
-                className={`truncate text-[11px] leading-relaxed ${workToneClass(child.tone)}`}
-                style={{ opacity: 0.25 + (0.75 * (i + 1)) / arr.length }}
-              >
-                {child.label}
-                {child.detail && (
-                  <span
-                    className="ml-1.5 inline-block max-w-[40ch] truncate align-bottom font-mono text-[11px] opacity-50"
-                    title={child.detail}
+        {!expanded && (() => {
+          // Running agents: show recent activity statuses from the turn stream
+          if (isRunning && recentActivityStatuses.length > 0) {
+            return (
+              <div className="mt-1.5 space-y-px pl-6">
+                {recentActivityStatuses.map((status, i, arr) => (
+                  <p
+                    key={`status-${i}`}
+                    className="truncate font-mono text-[11px] leading-relaxed text-muted-foreground/50"
+                    style={{ opacity: 0.25 + (0.75 * (i + 1)) / arr.length }}
                   >
-                    {child.detail}
-                  </span>
-                )}
-              </p>
-            ))}
-            {subagent.summary && subagent.childActivities.length === 0 && (
-              <p className="truncate text-[11px] leading-relaxed text-muted-foreground/40">
+                    {status}
+                  </p>
+                ))}
+              </div>
+            );
+          }
+          // Completed/failed agents: show last 3 child activities
+          if (hasChildren) {
+            return (
+              <div className="mt-1.5 space-y-px pl-6">
+                {subagent.childActivities.slice(-3).map((child, i, arr) => (
+                  <p
+                    key={`preview-${child.id}`}
+                    className={`truncate text-[11px] leading-relaxed ${workToneClass(child.tone)}`}
+                    style={{ opacity: 0.25 + (0.75 * (i + 1)) / arr.length }}
+                  >
+                    {child.label}
+                    {child.detail && (
+                      <span
+                        className="ml-1.5 inline-block max-w-[40ch] truncate align-bottom font-mono text-[11px] opacity-50"
+                        title={child.detail}
+                      >
+                        {child.detail}
+                      </span>
+                    )}
+                  </p>
+                ))}
+              </div>
+            );
+          }
+          // Fallback: summary text
+          if (subagent.summary) {
+            return (
+              <p className="mt-1 truncate pl-6 text-[11px] leading-relaxed text-muted-foreground/40">
                 {subagent.summary}
               </p>
-            )}
-          </div>
-        )}
+            );
+          }
+          return null;
+        })()}
 
         {/* Expandable children */}
         <div
@@ -636,6 +665,7 @@ function buildLocalDraftThread(
     messages: [],
     error,
     createdAt: draftThread.createdAt,
+    updatedAt: draftThread.createdAt,
     latestTurn: null,
     lastVisitedAt: draftThread.createdAt,
     branch: draftThread.branch,
@@ -918,11 +948,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
   const clearDraftThread = useComposerDraftStore((store) => store.clearDraftThread);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
+  const setWorktreeBranchName = useComposerDraftStore((store) => store.setWorktreeBranchName);
   const draftThread = useComposerDraftStore(
     (store) => store.draftThreadsByThreadId[threadId] ?? null,
   );
   const promptRef = useRef(prompt);
   const [isDragOverComposer, setIsDragOverComposer] = useState(false);
+  const [isWorktreeDialogOpen, setIsWorktreeDialogOpen] = useState(false);
   const [expandedImage, setExpandedImage] = useState<ExpandedImagePreview | null>(null);
   const [optimisticUserMessages, setOptimisticUserMessages] = useState<ChatMessage[]>([]);
   const optimisticUserMessagesRef = useRef(optimisticUserMessages);
@@ -1244,6 +1276,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const currentActivityStatus = useMemo(
     () => deriveCurrentActivityStatus(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
+  );
+  const recentActivityStatuses = useMemo(
+    () => deriveRecentActivityStatuses(threadActivities, activeLatestTurn?.turnId ?? undefined, 3),
+    [activeLatestTurn?.turnId, threadActivities],
+  );
+  const hasRunningSubagent = useMemo(
+    () => subagentGroups.some((g) => g.status === "running"),
+    [subagentGroups],
   );
   const latestTurnHasToolActivity = useMemo(
     () => hasToolActivityForTurn(threadActivities, activeLatestTurn?.turnId),
@@ -2486,7 +2526,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (!queued) return;
 
     // Restore the queued message into the composer and trigger send.
-    setQueuedMessage(null);
+    // Don't clear queuedMessage here — onSend will clear it after its
+    // guards pass, so the message survives if the deferred submit bails.
     promptRef.current = queued.text;
     setPrompt(queued.text);
     if (queued.images.length > 0) {
@@ -2936,6 +2977,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
     }
 
     if (!api || !activeThread || isSendBusy || isConnecting || sendInFlightRef.current) return;
+    // Clear the queued-message banner now that guards have passed and we will
+    // proceed with the send.  Clearing here (rather than in the auto-send
+    // effect) ensures the message survives if the deferred submit was skipped.
+    if (queuedMessageRef.current) {
+      setQueuedMessage(null);
+    }
     if (activePendingProgress) {
       onSubmitPendingUserInputAnswers();
       return;
@@ -3052,12 +3099,21 @@ export default function ChatView({ threadId }: ChatViewProps) {
       // On first message: lock in branch + create worktree if needed.
       if (baseBranchForWorktree) {
         beginSendPhase("preparing-worktree");
-        const newBranch = buildTemporaryWorktreeBranchName();
+        const rawBranchName = draftThread?.worktreeBranchName?.trim() || null;
+        const customWorktreeBranchName =
+          rawBranchName && rawBranchName !== WORKTREE_BRANCH_DEFAULT_TEMPLATE
+            ? rawBranchName
+            : null;
+        const newBranch = customWorktreeBranchName ?? buildTemporaryWorktreeBranchName();
         const result = await createWorktreeMutation.mutateAsync({
           cwd: activeProject.cwd,
           branch: baseBranchForWorktree,
           newBranch,
         });
+        // Clear the custom branch name after successful creation.
+        if (customWorktreeBranchName) {
+          setWorktreeBranchName(threadIdForSend, null);
+        }
         nextThreadBranch = result.worktree.branch;
         nextThreadWorktreePath = result.worktree.path;
         if (isServerThread) {
@@ -4131,6 +4187,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
           hasMessages={timelineEntries.length > 0}
           isWorking={isWorking}
           currentActivityStatus={currentActivityStatus}
+          recentActivityStatuses={recentActivityStatuses}
+          hasRunningSubagent={hasRunningSubagent}
           activeTurnInProgress={!latestTurnSettled}
           activeTurnStartedAt={activeLatestTurn?.startedAt ?? null}
           scrollContainer={messagesScrollElement}
@@ -4456,15 +4514,85 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         <span className="shrink-0 whitespace-nowrap px-2 text-sm text-muted-foreground/70 sm:px-3 sm:text-xs">
                           {activeWorktreePath ? "Worktree" : "Local"}
                         </span>
+                      ) : envMode === "worktree" ? (
+                        <>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+                            size="sm"
+                            onClick={() => {
+                              if (!draftThread?.worktreeBranchName) {
+                                setWorktreeBranchName(threadId, WORKTREE_BRANCH_DEFAULT_TEMPLATE);
+                              }
+                              setIsWorktreeDialogOpen(true);
+                            }}
+                          >
+                            {draftThread?.worktreeBranchName?.trim() &&
+                            draftThread.worktreeBranchName.trim() !== WORKTREE_BRANCH_DEFAULT_TEMPLATE
+                              ? draftThread.worktreeBranchName.trim()
+                              : "New worktree"}
+                            <ChevronDownIcon className="ml-1 size-3 opacity-60" />
+                          </Button>
+                          <Dialog
+                            open={isWorktreeDialogOpen}
+                            onOpenChange={setIsWorktreeDialogOpen}
+                          >
+                            <DialogPopup className="max-w-sm">
+                              <DialogHeader>
+                                <DialogTitle>Worktree branch name</DialogTitle>
+                                <DialogDescription>
+                                  Set a custom branch name, or leave blank to auto-generate.
+                                </DialogDescription>
+                              </DialogHeader>
+                              <DialogPanel className="space-y-3">
+                                <label className="grid gap-1.5">
+                                  <span className="text-xs font-medium text-foreground">Branch name</span>
+                                  <Input
+                                    value={draftThread?.worktreeBranchName ?? ""}
+                                    onChange={(event) =>
+                                      setWorktreeBranchName(threadId, event.target.value)
+                                    }
+                                    placeholder="Auto-generated (t3code/…) if left blank"
+                                    spellCheck={false}
+                                    autoFocus
+                                  />
+                                </label>
+                              </DialogPanel>
+                              <DialogFooter>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => {
+                                    onEnvModeChange("local");
+                                    setWorktreeBranchName(threadId, null);
+                                    setIsWorktreeDialogOpen(false);
+                                  }}
+                                >
+                                  Switch to local
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  onClick={() => {
+                                    setIsWorktreeDialogOpen(false);
+                                    scheduleComposerFocus();
+                                  }}
+                                >
+                                  Done
+                                </Button>
+                              </DialogFooter>
+                            </DialogPopup>
+                          </Dialog>
+                        </>
                       ) : (
                         <Button
                           type="button"
                           variant="ghost"
                           className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
                           size="sm"
-                          onClick={() => onEnvModeChange(envMode === "worktree" ? "local" : "worktree")}
+                          onClick={() => onEnvModeChange("worktree")}
                         >
-                          {envMode === "worktree" ? "New worktree" : "Local"}
+                          Local
                         </Button>
                       )}
                       {/* Branch selector */}
@@ -4701,14 +4829,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
           />
         ) : null}
       </div>{/* end horizontal flex container */}
-
-      {isGitRepo && (
-        <BranchToolbar
-          threadId={activeThread.id}
-          envLocked={envLocked}
-          onComposerFocusRequest={scheduleComposerFocus}
-        />
-      )}
 
       {(() => {
         if (!terminalState.terminalOpen || !activeProject) {
@@ -5893,6 +6013,8 @@ interface MessagesTimelineProps {
   hasMessages: boolean;
   isWorking: boolean;
   currentActivityStatus: string | null;
+  recentActivityStatuses: string[];
+  hasRunningSubagent: boolean;
   activeTurnInProgress: boolean;
   activeTurnStartedAt: string | null;
   scrollContainer: HTMLDivElement | null;
@@ -5968,6 +6090,8 @@ const MessagesTimeline = memo(function MessagesTimeline({
   hasMessages,
   isWorking,
   currentActivityStatus,
+  recentActivityStatuses,
+  hasRunningSubagent,
   activeTurnInProgress,
   activeTurnStartedAt,
   scrollContainer,
@@ -6473,7 +6597,13 @@ const MessagesTimeline = memo(function MessagesTimeline({
         </div>
       )}
 
-      {row.kind === "subagent" && <SubagentCard subagent={row.subagent} nowIso={nowIso} />}
+      {row.kind === "subagent" && (
+        <SubagentCard
+          subagent={row.subagent}
+          nowIso={nowIso}
+          recentActivityStatuses={row.subagent.status === "running" ? recentActivityStatuses : []}
+        />
+      )}
 
       {row.kind === "user-input" && pendingUserInput && (
         <UserInputQuestionCard
@@ -6488,7 +6618,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
         />
       )}
 
-      {row.kind === "working" && (
+      {row.kind === "working" && !hasRunningSubagent && (
         <div className="flex items-center gap-2 py-0.5 pl-1.5">
           <span className="inline-flex items-center gap-[3px]">
             <span className="h-1 w-1 rounded-full bg-muted-foreground/40 animate-pulse" />

@@ -206,7 +206,10 @@ function EventRouter() {
       if (event.type === "thread.activity-appended") {
         const threads = useStore.getState().threads;
         const thread = threads.find((t) => t.id === event.payload.threadId);
-        dispatchActivityNotification(event.payload.activity, thread?.title ?? "Thread");
+        const threadId = event.payload.threadId;
+        dispatchActivityNotification(event.payload.activity, thread?.title ?? "Thread", () => {
+          void navigate({ to: "/$threadId", params: { threadId } });
+        });
       }
       if (event.type === "thread.session-set") {
         const { threadId, session } = event.payload;
@@ -214,7 +217,9 @@ function EventRouter() {
         sessionStatusByThread.set(threadId, session.status);
         const threads = useStore.getState().threads;
         const thread = threads.find((t) => t.id === threadId);
-        dispatchSessionSetNotification(threadId, thread?.title ?? "Thread", session.status, previousStatus);
+        dispatchSessionSetNotification(threadId, thread?.title ?? "Thread", session.status, previousStatus, () => {
+          void navigate({ to: "/$threadId", params: { threadId } });
+        });
       }
     });
     const unsubTerminalEvent = api.terminal.onEvent((event) => {
