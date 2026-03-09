@@ -23,7 +23,7 @@ const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${t
 const providerCommandId = (event: ProviderRuntimeEvent, tag: string): CommandId =>
   CommandId.makeUnsafe(`provider:${event.eventId}:${tag}:${crypto.randomUUID()}`);
 
-const DEFAULT_ASSISTANT_DELIVERY_MODE: AssistantDeliveryMode = "buffered";
+const DEFAULT_ASSISTANT_DELIVERY_MODE: AssistantDeliveryMode = "streaming";
 const TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY = 10_000;
 const TURN_MESSAGE_IDS_BY_TURN_TTL = Duration.minutes(120);
 const BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_CACHE_CAPACITY = 20_000;
@@ -169,6 +169,20 @@ const contextWindowStore = new Map<string, number>();
 /** Get the latest context window size for a thread. */
 export function getThreadContextWindowSize(threadId: string): number | null {
   return contextWindowStore.get(threadId) ?? null;
+}
+
+/**
+ * Context occupancy: actual tokens occupying the context window for the
+ * latest parent-level API call (input + cache_creation + cache_read).
+ * Unlike billing tokens from `SDKResultMessage.usage` (which are cumulative
+ * across ALL API calls including subagents), this reflects the real context
+ * window fill level.
+ */
+const contextOccupancyStore = new Map<string, number>();
+
+/** Get the latest context window occupancy for a thread (tokens). */
+export function getThreadContextOccupancy(threadId: string): number | null {
+  return contextOccupancyStore.get(threadId) ?? null;
 }
 
 function normalizeRuntimeTurnState(
@@ -583,6 +597,23 @@ function runtimeEventToActivities(
         ];
       }
       return [];
+    }
+
+    case "tool.summary": {
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: "tool.summary",
+          summary: event.payload.summary ?? "Tool summary",
+          payload: {
+            summary: event.payload.summary,
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
     }
 
     default:
@@ -1120,6 +1151,12 @@ const make = Effect.gen(function* () {
             const contextWindow = extractContextWindowFromModelUsage(modelUsageRaw);
             if (contextWindow !== null) {
               contextWindowStore.set(thread.id, contextWindow);
+            }
+
+            // Extract context occupancy from per-API-call usage (not cumulative billing)
+            const contextOccupancy = asInt(payload?.["contextOccupancyTokens"]);
+            if (contextOccupancy !== null && contextOccupancy > 0) {
+              contextOccupancyStore.set(thread.id, contextOccupancy);
             }
 
             yield* orchestrationEngine.dispatch({

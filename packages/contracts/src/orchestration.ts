@@ -118,12 +118,18 @@ export const ProjectScriptIcon = Schema.Literals([
 ]);
 export type ProjectScriptIcon = typeof ProjectScriptIcon.Type;
 
+export const ProjectScriptTerminalTarget = Schema.Literals(["thread", "project"]);
+export type ProjectScriptTerminalTarget = typeof ProjectScriptTerminalTarget.Type;
+
 export const ProjectScript = Schema.Struct({
   id: TrimmedNonEmptyString,
   name: TrimmedNonEmptyString,
   command: TrimmedNonEmptyString,
   icon: ProjectScriptIcon,
   runOnWorktreeCreate: Schema.Boolean,
+  terminalTarget: ProjectScriptTerminalTarget.pipe(
+    Schema.withDecodingDefault(() => "thread" as const),
+  ),
 });
 export type ProjectScript = typeof ProjectScript.Type;
 

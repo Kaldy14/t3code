@@ -73,12 +73,21 @@ interface ClaudeResumeState {
 
 interface ClaudeTurnState {
   readonly turnId: TurnId;
-  readonly assistantItemId: string;
+  assistantItemId: string;
   readonly startedAt: string;
   readonly items: Array<unknown>;
   readonly messageCompleted: boolean;
-  readonly emittedTextDelta: boolean;
-  readonly fallbackAssistantText: string;
+  emittedTextDelta: boolean;
+  fallbackAssistantText: string;
+  lastBlockWasToolUse: boolean;
+  /**
+   * Context window occupancy from the latest parent-level API call.
+   * Derived from `BetaMessage.usage` on `SDKAssistantMessage` where
+   * `parent_tool_use_id === null`. Equals `input_tokens +
+   * cache_creation_input_tokens + cache_read_input_tokens` for that
+   * single API call — the actual context window fill level.
+   */
+  latestContextOccupancy?: number;
 }
 
 interface PendingApproval {
@@ -860,6 +869,9 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
             ...(typeof result?.total_cost_usd === "number"
               ? { totalCostUsd: result.total_cost_usd }
               : {}),
+            ...(turnState.latestContextOccupancy !== undefined
+              ? { contextOccupancyTokens: turnState.latestContextOccupancy }
+              : {}),
             ...(errorMessage ? { errorMessage } : {}),
           },
           providerRefs: {
@@ -933,11 +945,47 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
 
         if (event.type === "content_block_start") {
           const { index, content_block: block } = event;
-          if (
-            block.type !== "tool_use" &&
-            block.type !== "server_tool_use" &&
-            block.type !== "mcp_tool_use"
-          ) {
+          const isToolBlock =
+            block.type === "tool_use" ||
+            block.type === "server_tool_use" ||
+            block.type === "mcp_tool_use";
+
+          if (!isToolBlock) {
+            // Text content block starting — if the previous block was a tool,
+            // finalize the current assistant message and start a new one so
+            // each text segment becomes a separate chat message.
+            if (context.turnState?.lastBlockWasToolUse) {
+              const ts = context.turnState;
+              if (ts.emittedTextDelta || ts.fallbackAssistantText.length > 0) {
+                // Finalize the previous assistant text segment
+                const stamp = yield* makeEventStamp();
+                yield* offerRuntimeEvent({
+                  type: "item.completed",
+                  eventId: stamp.eventId,
+                  provider: PROVIDER,
+                  createdAt: stamp.createdAt,
+                  itemId: asRuntimeItemId(ts.assistantItemId),
+                  threadId: context.internalThreadId,
+                  turnId: ts.turnId,
+                  payload: {
+                    itemType: "assistant_message",
+                    status: "completed",
+                    title: "Assistant message",
+                  },
+                  providerRefs: {
+                    ...providerThreadRef(context),
+                    providerTurnId: ts.turnId,
+                    providerItemId: ProviderItemId.makeUnsafe(ts.assistantItemId),
+                  },
+                });
+              }
+
+              // Generate a new assistant item ID for the next text segment
+              ts.assistantItemId = crypto.randomUUID();
+              ts.emittedTextDelta = false;
+              ts.fallbackAssistantText = "";
+              ts.lastBlockWasToolUse = false;
+            }
             return;
           }
 
@@ -1026,6 +1074,12 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
               payload: message,
             },
           });
+
+          // Mark that the last completed block was a tool, so the next
+          // text content_block_start knows to create a new assistant message.
+          if (context.turnState) {
+            context.turnState.lastBlockWasToolUse = true;
+          }
         }
       });
 
@@ -1049,6 +1103,25 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
               ...context.turnState,
               fallbackAssistantText,
             };
+          }
+
+          // Track context window occupancy from parent-level API calls.
+          // `parent_tool_use_id === null` means this is the main conversation,
+          // not a subagent. BetaMessage.usage has per-API-call token counts.
+          if (message.parent_tool_use_id === null) {
+            const betaUsage = (message.message as { usage?: Record<string, unknown> })?.usage;
+            if (betaUsage) {
+              const inputTokens = typeof betaUsage.input_tokens === "number" ? betaUsage.input_tokens : 0;
+              const cacheCreation =
+                typeof betaUsage.cache_creation_input_tokens === "number"
+                  ? betaUsage.cache_creation_input_tokens
+                  : 0;
+              const cacheRead =
+                typeof betaUsage.cache_read_input_tokens === "number"
+                  ? betaUsage.cache_read_input_tokens
+                  : 0;
+              context.turnState.latestContextOccupancy = inputTokens + cacheCreation + cacheRead;
+            }
           }
 
           const stamp = yield* makeEventStamp();
@@ -2000,6 +2073,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           messageCompleted: false,
           emittedTextDelta: false,
           fallbackAssistantText: "",
+          lastBlockWasToolUse: false,
         };
 
         const updatedAt = yield* nowIso;

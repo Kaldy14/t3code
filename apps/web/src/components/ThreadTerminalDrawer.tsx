@@ -732,12 +732,14 @@ export default function ThreadTerminalDrawer({
       style={{ height: `${drawerHeight}px` }}
     >
       <div
-        className="absolute inset-x-0 top-0 z-20 h-1.5 cursor-row-resize"
+        className="group/resize absolute inset-x-0 -top-1 z-20 flex h-3 cursor-row-resize items-center justify-center"
         onPointerDown={handleResizePointerDown}
         onPointerMove={handleResizePointerMove}
         onPointerUp={handleResizePointerEnd}
         onPointerCancel={handleResizePointerEnd}
-      />
+      >
+        <div className="h-[2px] w-12 rounded-full bg-border/0 transition-colors group-hover/resize:bg-border" />
+      </div>
 
       {!hasTerminalSidebar && (
         <div className="pointer-events-none absolute right-2 top-2 z-20">

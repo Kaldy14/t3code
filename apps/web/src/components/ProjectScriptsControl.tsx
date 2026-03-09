@@ -1,6 +1,7 @@
 import type {
   ProjectScript,
   ProjectScriptIcon,
+  ProjectScriptTerminalTarget,
   ResolvedKeybindingsConfig,
 } from "@t3tools/contracts";
 import {
@@ -74,6 +75,7 @@ export interface NewProjectScriptInput {
   command: string;
   icon: ProjectScriptIcon;
   runOnWorktreeCreate: boolean;
+  terminalTarget: ProjectScriptTerminalTarget;
   keybinding: string | null;
 }
 
@@ -153,6 +155,7 @@ export default function ProjectScriptsControl({
   const [icon, setIcon] = useState<ProjectScriptIcon>("play");
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [runOnWorktreeCreate, setRunOnWorktreeCreate] = useState(false);
+  const [terminalTarget, setTerminalTarget] = useState<ProjectScriptTerminalTarget>("thread");
   const [keybinding, setKeybinding] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
 
@@ -209,6 +212,7 @@ export default function ProjectScriptsControl({
         command: trimmedCommand,
         icon,
         runOnWorktreeCreate,
+        terminalTarget,
         keybinding: keybindingRule?.key ?? null,
       } satisfies NewProjectScriptInput;
       if (editingScriptId) {
@@ -230,6 +234,7 @@ export default function ProjectScriptsControl({
     setIcon("play");
     setIconPickerOpen(false);
     setRunOnWorktreeCreate(false);
+    setTerminalTarget("thread");
     setKeybinding("");
     setValidationError(null);
     setDialogOpen(true);
@@ -242,6 +247,7 @@ export default function ProjectScriptsControl({
     setIcon(script.icon);
     setIconPickerOpen(false);
     setRunOnWorktreeCreate(script.runOnWorktreeCreate);
+    setTerminalTarget(script.terminalTarget);
     setKeybinding(keybindingValueForCommand(keybindings, commandForProjectScript(script.id)) ?? "");
     setValidationError(null);
     setDialogOpen(true);
@@ -343,6 +349,7 @@ export default function ProjectScriptsControl({
           setCommand("");
           setIcon("play");
           setRunOnWorktreeCreate(false);
+          setTerminalTarget("thread");
           setKeybinding("");
           setValidationError(null);
         }}
@@ -429,6 +436,15 @@ export default function ProjectScriptsControl({
                   onChange={(event) => setCommand(event.target.value)}
                 />
               </div>
+              <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm">
+                <span>Run in project terminal</span>
+                <Switch
+                  checked={terminalTarget === "project"}
+                  onCheckedChange={(checked) =>
+                    setTerminalTarget(checked ? "project" : "thread")
+                  }
+                />
+              </label>
               <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm">
                 <span>Run automatically on worktree creation</span>
                 <Switch

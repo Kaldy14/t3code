@@ -1,6 +1,7 @@
 import {
   ChevronRightIcon,
   FolderIcon,
+  GripVerticalIcon,
   GitPullRequestIcon,
   RocketIcon,
   SettingsIcon,
@@ -23,7 +24,7 @@ import { useAppSettings } from "../appSettings";
 import { isElectron } from "../env";
 import { APP_STAGE_LABEL } from "../branding";
 import { newCommandId, newProjectId, newThreadId } from "../lib/utils";
-import { useStore } from "../store";
+import { orderProjects, useStore } from "../store";
 import { isChatNewLocalShortcut, isChatNewShortcut, shortcutLabelForCommand } from "../keybindings";
 import { type Thread, projectTerminalThreadId } from "../types";
 import { derivePendingApprovals, derivePendingUserInputs } from "../session-logic";
@@ -274,6 +275,14 @@ function ProjectFavicon({ cwd }: { cwd: string }) {
 export default function Sidebar() {
   const projects = useStore((store) => store.projects);
   const threads = useStore((store) => store.threads);
+  const projectOrder = useStore((store) => store.projectOrder);
+  const storeSetProjectOrder = useStore((store) => store.setProjectOrder);
+  const orderedProjects = useMemo(
+    () => orderProjects(projects, projectOrder),
+    [projects, projectOrder],
+  );
+  const [draggedProjectId, setDraggedProjectId] = useState<string | null>(null);
+  const [dragOverProjectId, setDragOverProjectId] = useState<string | null>(null);
   const markThreadUnread = useStore((store) => store.markThreadUnread);
   const toggleProject = useStore((store) => store.toggleProject);
   const clearComposerDraftForThread = useComposerDraftStore((store) => store.clearThreadDraft);
@@ -283,7 +292,7 @@ export default function Sidebar() {
   const getDraftThread = useComposerDraftStore((store) => store.getDraftThread);
   const terminalStateByThreadId = useTerminalStateStore((state) => state.terminalStateByThreadId);
   const clearTerminalState = useTerminalStateStore((state) => state.clearTerminalState);
-  const storeSetTerminalOpen = useTerminalStateStore((state) => state.setTerminalOpen);
+  const storeSetTerminalOpen = useTerminalStateStore((state) => state.setProjectTerminalOpen);
   const setProjectDraftThreadId = useComposerDraftStore((store) => store.setProjectDraftThreadId);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
   const clearProjectDraftThreadId = useComposerDraftStore(
@@ -1042,7 +1051,7 @@ export default function Sidebar() {
       <SidebarContent className="gap-0">
         <SidebarGroup className="px-2 py-2">
           <SidebarMenu>
-            {projects.map((project) => {
+            {orderedProjects.map((project) => {
               const projectThreads = threads
                 .filter((thread) => thread.projectId === project.id)
                 .toSorted((a, b) => {
@@ -1057,6 +1066,8 @@ export default function Sidebar() {
                   ? projectThreads.slice(0, THREAD_PREVIEW_LIMIT)
                   : projectThreads;
 
+              const isDragOver = dragOverProjectId === project.id && draggedProjectId !== project.id;
+
               return (
                 <Collapsible
                   key={project.id}
@@ -1067,13 +1078,68 @@ export default function Sidebar() {
                     toggleProject(project.id);
                   }}
                 >
-                  <SidebarMenuItem>
-                    <div className="group/project-header relative">
+                  <SidebarMenuItem
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                      setDragOverProjectId(project.id);
+                    }}
+                    onDragLeave={() => {
+                      setDragOverProjectId((current) =>
+                        current === project.id ? null : current,
+                      );
+                    }}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const fromId = draggedProjectId;
+                      setDraggedProjectId(null);
+                      setDragOverProjectId(null);
+                      if (!fromId || fromId === project.id) return;
+                      const currentOrder: string[] = orderedProjects.map((p) => p.id);
+                      const fromIndex = currentOrder.indexOf(fromId);
+                      const toIndex = currentOrder.indexOf(project.id);
+                      if (fromIndex === -1 || toIndex === -1) return;
+                      currentOrder.splice(fromIndex, 1);
+                      currentOrder.splice(toIndex, 0, fromId);
+                      storeSetProjectOrder(currentOrder);
+                    }}
+                  >
+                    <div
+                      className={`group/project-header relative rounded-md transition-colors ${
+                        isDragOver
+                          ? "ring-1 ring-ring/50 bg-accent/40"
+                          : draggedProjectId === project.id
+                            ? "opacity-40"
+                            : ""
+                      }`}
+                    >
+                      {projects.length > 1 && (
+                        <div
+                          draggable
+                          onDragStart={(event) => {
+                            event.dataTransfer.effectAllowed = "move";
+                            event.dataTransfer.setData("text/plain", project.id);
+                            setDraggedProjectId(project.id);
+                          }}
+                          onDragEnd={() => {
+                            setDraggedProjectId(null);
+                            setDragOverProjectId(null);
+                          }}
+                          className="absolute left-0 top-0 z-10 flex h-full w-5 cursor-grab items-center justify-center opacity-0 transition-opacity group-hover/project-header:opacity-100 active:cursor-grabbing"
+                          title="Drag to reorder"
+                        >
+                          <GripVerticalIcon className="size-3 text-muted-foreground/50" />
+                        </div>
+                      )}
                       <CollapsibleTrigger
                         render={
                           <SidebarMenuButton
                             size="sm"
-                            className="gap-2 px-2 py-1.5 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground"
+                            className={`gap-2 py-1.5 text-left hover:bg-accent group-hover/project-header:bg-accent group-hover/project-header:text-sidebar-accent-foreground ${
+                              projects.length > 1
+                                ? "pl-5 pr-2 group-hover/project-header:pl-5"
+                                : "px-2"
+                            }`}
                           />
                         }
                         onContextMenu={(event) => {

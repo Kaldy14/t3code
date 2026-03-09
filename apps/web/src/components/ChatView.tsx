@@ -80,6 +80,7 @@ import {
   PROVIDER_OPTIONS,
   deriveWorkLogEntries,
   deriveSubagentGroups,
+  deriveCurrentActivityStatus,
   hasToolActivityForTurn,
   isLatestTurnSettled,
   formatElapsed,
@@ -112,6 +113,7 @@ import {
   DEFAULT_RUNTIME_MODE,
   DEFAULT_THREAD_TERMINAL_ID,
   MAX_THREAD_TERMINAL_COUNT,
+  projectTerminalThreadId,
   type ChatMessage,
   type Thread,
   type TurnDiffFileChange,
@@ -859,6 +861,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
     Record<ThreadId, string | null>
   >({});
   const [sendPhase, setSendPhase] = useState<SendPhase>("idle");
+  const [queuedMessage, setQueuedMessage] = useState<{
+    text: string;
+    images: ComposerImageAttachment[];
+  } | null>(null);
+  const queuedMessageRef = useRef(queuedMessage);
+  queuedMessageRef.current = queuedMessage;
   const [isConnecting, _setIsConnecting] = useState(false);
   const [isRevertingCheckpoint, setIsRevertingCheckpoint] = useState(false);
   const [respondingRequestIds, setRespondingRequestIds] = useState<ApprovalRequestId[]>([]);
@@ -924,6 +932,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const storeNewTerminal = useTerminalStateStore((s) => s.newTerminal);
   const storeSetActiveTerminal = useTerminalStateStore((s) => s.setActiveTerminal);
   const storeCloseTerminal = useTerminalStateStore((s) => s.closeTerminal);
+  const storeSetProjectTerminalOpen = useTerminalStateStore((s) => s.setProjectTerminalOpen);
 
   const setPrompt = useCallback(
     (nextPrompt: string) => {
@@ -1129,12 +1138,20 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
   const nowIso = new Date(nowTick).toISOString();
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES;
+  // When the turn is settled (not actively running), show activities from ALL turns
+  // so tool calls and history are preserved after a thread finishes.
+  // During active work, filter to the latest turn to keep the UI focused.
+  const workLogTurnId = latestTurnSettled ? undefined : (activeLatestTurn?.turnId ?? undefined);
   const workLogEntries = useMemo(
-    () => deriveWorkLogEntries(threadActivities, activeLatestTurn?.turnId ?? undefined),
-    [activeLatestTurn?.turnId, threadActivities],
+    () => deriveWorkLogEntries(threadActivities, workLogTurnId),
+    [workLogTurnId, threadActivities],
   );
   const subagentGroups = useMemo(
-    () => deriveSubagentGroups(threadActivities, activeLatestTurn?.turnId ?? undefined),
+    () => deriveSubagentGroups(threadActivities, workLogTurnId),
+    [workLogTurnId, threadActivities],
+  );
+  const currentActivityStatus = useMemo(
+    () => deriveCurrentActivityStatus(threadActivities, activeLatestTurn?.turnId ?? undefined),
     [activeLatestTurn?.turnId, threadActivities],
   );
   const latestTurnHasToolActivity = useMemo(
@@ -1205,7 +1222,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const hasComposerHeader =
     isComposerApprovalState ||
     pendingUserInputs.length > 0 ||
-    (showPlanFollowUpPrompt && activeProposedPlan !== null);
+    (showPlanFollowUpPrompt && activeProposedPlan !== null) ||
+    queuedMessage !== null;
   useEffect(() => {
     if (!activePendingProgress) {
       return;
@@ -1739,6 +1757,44 @@ export default function ChatView({ threadId }: ChatViewProps) {
         });
       }
       const targetCwd = options?.cwd ?? gitCwd ?? activeProject.cwd;
+
+      const runtimeEnv = projectScriptRuntimeEnv({
+        project: {
+          cwd: activeProject.cwd,
+        },
+        worktreePath: options?.worktreePath ?? activeThread.worktreePath ?? null,
+        ...(options?.env ? { extraEnv: options.env } : {}),
+      });
+
+      // Route to project terminal when configured
+      if (script.terminalTarget === "project") {
+        const projThreadId = projectTerminalThreadId(activeProject.id);
+        const projTerminalId = DEFAULT_THREAD_TERMINAL_ID;
+
+        storeSetProjectTerminalOpen(projThreadId, true);
+
+        try {
+          await api.terminal.open({
+            threadId: projThreadId,
+            terminalId: projTerminalId,
+            cwd: targetCwd,
+            env: runtimeEnv,
+          });
+          await api.terminal.write({
+            threadId: projThreadId,
+            terminalId: projTerminalId,
+            data: `${script.command}\r`,
+          });
+        } catch (error) {
+          setThreadError(
+            activeThreadId,
+            error instanceof Error ? error.message : `Failed to run script "${script.name}".`,
+          );
+        }
+        return;
+      }
+
+      // Default: run in thread terminal
       const baseTerminalId =
         terminalState.activeTerminalId ||
         terminalState.terminalIds[0] ||
@@ -1759,13 +1815,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
       }
       setTerminalFocusRequestId((value) => value + 1);
 
-      const runtimeEnv = projectScriptRuntimeEnv({
-        project: {
-          cwd: activeProject.cwd,
-        },
-        worktreePath: options?.worktreePath ?? activeThread.worktreePath ?? null,
-        ...(options?.env ? { extraEnv: options.env } : {}),
-      });
       const openTerminalInput: Parameters<typeof api.terminal.open>[0] = shouldCreateNewTerminal
         ? {
             threadId: activeThreadId,
@@ -1806,6 +1855,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       setThreadError,
       storeNewTerminal,
       storeSetActiveTerminal,
+      storeSetProjectTerminalOpen,
       terminalState.activeTerminalId,
       terminalState.runningTerminalIds,
       terminalState.terminalIds,
@@ -1855,6 +1905,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         command: input.command,
         icon: input.icon,
         runOnWorktreeCreate: input.runOnWorktreeCreate,
+        terminalTarget: input.terminalTarget,
       };
       const nextScripts = input.runOnWorktreeCreate
         ? [
@@ -1890,6 +1941,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
         command: input.command,
         icon: input.icon,
         runOnWorktreeCreate: input.runOnWorktreeCreate,
+        terminalTarget: input.terminalTarget,
       };
       const nextScripts = activeProject.scripts.map((script) =>
         script.id === scriptId
@@ -2273,6 +2325,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
       return [];
     });
     setSendPhase("idle");
+    setQueuedMessage((prev) => {
+      if (prev) {
+        for (const img of prev.images) {
+          revokeBlobPreviewUrl(img.previewUrl);
+        }
+      }
+      return null;
+    });
     setComposerHighlightedItemId(null);
     setComposerCursor(promptRef.current.length);
     setComposerTrigger(detectComposerTrigger(promptRef.current, promptRef.current.length));
@@ -2280,6 +2340,33 @@ export default function ChatView({ threadId }: ChatViewProps) {
     setIsDragOverComposer(false);
     setExpandedImage(null);
   }, [threadId]);
+
+  // Auto-send queued message when the running turn completes.
+  // Track previous phase to detect running -> ready transition specifically.
+  const prevPhaseRef = useRef(phase);
+  useEffect(() => {
+    const prevPhase = prevPhaseRef.current;
+    prevPhaseRef.current = phase;
+
+    // Only fire on running -> ready transition (not on mount, disconnect, or error).
+    if (prevPhase !== "running" || phase !== "ready") return;
+
+    const queued = queuedMessageRef.current;
+    if (!queued) return;
+
+    // Restore the queued message into the composer and trigger send.
+    setQueuedMessage(null);
+    promptRef.current = queued.text;
+    setPrompt(queued.text);
+    if (queued.images.length > 0) {
+      addComposerImagesToDraft(queued.images);
+    }
+    // Defer the submit to the next frame so the composer state is settled.
+    window.requestAnimationFrame(() => {
+      if (sendInFlightRef.current) return;
+      composerFormRef.current?.requestSubmit();
+    });
+  }, [phase, setPrompt, addComposerImagesToDraft]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2666,6 +2753,26 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const onSend = async (e?: { preventDefault: () => void }) => {
     e?.preventDefault();
     const api = readNativeApi();
+
+    // When a turn is running, queue the message instead of blocking.
+    // The queued message will be sent automatically when the turn completes,
+    // or immediately if the user clicks "Steer" (interrupt + send).
+    if (phase === "running" && api && activeThread && !isSendBusy && !sendInFlightRef.current) {
+      const trimmedForQueue = prompt.trim();
+      if (trimmedForQueue || composerImages.length > 0) {
+        setQueuedMessage({
+          text: trimmedForQueue,
+          images: [...composerImages],
+        });
+        promptRef.current = "";
+        clearComposerDraftContent(activeThread.id);
+        setComposerHighlightedItemId(null);
+        setComposerCursor(0);
+        setComposerTrigger(null);
+        return;
+      }
+    }
+
     if (!api || !activeThread || isSendBusy || isConnecting || sendInFlightRef.current) return;
     if (activePendingProgress) {
       onSubmitPendingUserInputAnswers();
@@ -2956,6 +3063,30 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const onInterrupt = async () => {
     const api = readNativeApi();
     if (!api || !activeThread) return;
+    // Stop clears any queued message — user chose to stop, not steer.
+    setQueuedMessage((prev) => {
+      if (prev) {
+        for (const img of prev.images) {
+          revokeBlobPreviewUrl(img.previewUrl);
+        }
+      }
+      return null;
+    });
+    await api.orchestration.dispatchCommand({
+      type: "thread.turn.interrupt",
+      commandId: newCommandId(),
+      threadId: activeThread.id,
+      createdAt: new Date().toISOString(),
+    });
+  };
+
+  const onSteer = async () => {
+    const api = readNativeApi();
+    if (!api || !activeThread) return;
+    const queued = queuedMessageRef.current;
+    if (!queued) return;
+    // Interrupt current turn. The queued message stays in state —
+    // the auto-send effect will dispatch it when phase transitions to "ready".
     await api.orchestration.dispatchCommand({
       type: "thread.turn.interrupt",
       commandId: newCommandId(),
@@ -3789,6 +3920,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           key={activeThread.id}
           hasMessages={timelineEntries.length > 0}
           isWorking={isWorking}
+          currentActivityStatus={currentActivityStatus}
           activeTurnInProgress={!latestTurnSettled}
           activeTurnStartedAt={activeLatestTurn?.startedAt ?? null}
           scrollContainer={messagesScrollElement}
@@ -3848,6 +3980,29 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   key={activeProposedPlan.id}
                   planTitle={proposedPlanTitle(activeProposedPlan.planMarkdown) ?? null}
                 />
+              </div>
+            ) : queuedMessage ? (
+              <div className="rounded-t-[19px] border-b border-border/65 bg-amber-500/8">
+                <div className="flex items-center gap-2 px-3.5 py-2 sm:px-4">
+                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                    <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                      Queued
+                    </span>
+                    <span className="truncate text-sm text-muted-foreground">
+                      {queuedMessage.text || `${queuedMessage.images.length} image(s)`}
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    className="shrink-0 rounded-md p-1 text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground/80"
+                    onClick={() => setQueuedMessage(null)}
+                    aria-label="Cancel queued message"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                      <path d="M3.5 3.5L10.5 10.5M10.5 3.5L3.5 10.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                    </svg>
+                  </button>
+                </div>
               </div>
             ) : null}
 
@@ -4110,22 +4265,37 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     <span className="text-muted-foreground/70 text-xs">Preparing worktree...</span>
                   ) : null}
                   {phase === "running" ? (
-                    <button
-                      type="button"
-                      className="flex size-8 items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
-                      onClick={() => void onInterrupt()}
-                      aria-label="Stop generation"
-                    >
-                      <svg
-                        width="12"
-                        height="12"
-                        viewBox="0 0 12 12"
-                        fill="currentColor"
-                        aria-hidden="true"
+                    <div className="flex items-center gap-1.5">
+                      {queuedMessage ? (
+                        <button
+                          type="button"
+                          className="flex h-8 items-center gap-1.5 rounded-full bg-amber-500/90 px-3 text-xs font-medium text-white transition-all duration-150 hover:bg-amber-500 hover:scale-105"
+                          onClick={() => void onSteer()}
+                          aria-label="Steer — interrupt and send queued message"
+                        >
+                          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                            <path d="M6 10V2M6 2L2.5 5.5M6 2L9.5 5.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                          Steer
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="flex size-8 items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"
+                        onClick={() => void onInterrupt()}
+                        aria-label="Stop generation"
                       >
-                        <rect x="2" y="2" width="8" height="8" rx="1.5" />
-                      </svg>
-                    </button>
+                        <svg
+                          width="12"
+                          height="12"
+                          viewBox="0 0 12 12"
+                          fill="currentColor"
+                          aria-hidden="true"
+                        >
+                          <rect x="2" y="2" width="8" height="8" rx="1.5" />
+                        </svg>
+                      </button>
+                    </div>
                   ) : pendingUserInputs.length === 0 ? (
                     showPlanFollowUpPrompt ? (
                       prompt.trim().length > 0 ? (
@@ -5213,6 +5383,7 @@ const UserInputQuestionCard = memo(function UserInputQuestionCard({
 interface MessagesTimelineProps {
   hasMessages: boolean;
   isWorking: boolean;
+  currentActivityStatus: string | null;
   activeTurnInProgress: boolean;
   activeTurnStartedAt: string | null;
   scrollContainer: HTMLDivElement | null;
@@ -5287,6 +5458,7 @@ function estimateTimelineProposedPlanHeight(proposedPlan: TimelineProposedPlan):
 const MessagesTimeline = memo(function MessagesTimeline({
   hasMessages,
   isWorking,
+  currentActivityStatus,
   activeTurnInProgress,
   activeTurnStartedAt,
   scrollContainer,
@@ -5789,14 +5961,20 @@ const MessagesTimeline = memo(function MessagesTimeline({
 
       {row.kind === "working" && (
         <div className="flex items-center gap-2 py-0.5 pl-1.5">
-          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted-foreground/30" />
-          <div className="flex items-center pt-1">
-            <span className="inline-flex items-center gap-[3px]">
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse" />
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:200ms]" />
-              <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:400ms]" />
+          <span className="inline-flex items-center gap-[3px]">
+            <span className="h-1 w-1 rounded-full bg-muted-foreground/40 animate-pulse" />
+            <span className="h-1 w-1 rounded-full bg-muted-foreground/40 animate-pulse [animation-delay:200ms]" />
+            <span className="h-1 w-1 rounded-full bg-muted-foreground/40 animate-pulse [animation-delay:400ms]" />
+          </span>
+          {currentActivityStatus ? (
+            <span className="max-w-[60ch] truncate font-mono text-[11px] text-muted-foreground/50">
+              {currentActivityStatus}
             </span>
-          </div>
+          ) : (
+            <span className="text-[11px] text-muted-foreground/40">
+              Thinking…
+            </span>
+          )}
         </div>
       )}
     </div>

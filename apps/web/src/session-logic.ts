@@ -534,6 +534,93 @@ function compareActivitiesByOrder(
   return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
 }
 
+/**
+ * Derives a human-readable status label describing what the agent is currently doing.
+ * Returns null when there's no meaningful in-flight activity to display.
+ */
+export function deriveCurrentActivityStatus(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  latestTurnId: TurnId | undefined,
+): string | null {
+  if (!latestTurnId) return null;
+
+  const ordered = [...activities]
+    .filter((a) => a.turnId === latestTurnId)
+    .toSorted(compareActivitiesByOrder);
+
+  // Walk backwards to find the most recent meaningful activity
+  for (let i = ordered.length - 1; i >= 0; i--) {
+    const activity = ordered[i];
+    if (!activity) continue;
+
+    const payload =
+      activity.payload && typeof activity.payload === "object"
+        ? (activity.payload as Record<string, unknown>)
+        : null;
+    const detail = payload && typeof payload.detail === "string" ? payload.detail : undefined;
+    const itemType =
+      payload && typeof payload.itemType === "string" ? payload.itemType : undefined;
+
+    switch (activity.kind) {
+      case "tool.started":
+      case "tool.updated":
+        return formatToolStatusLabel(itemType, activity.summary, detail);
+      case "tool.completed":
+        // Between tools — agent is thinking about next step
+        return null;
+      case "task.progress":
+        return detail ?? "Reasoning…";
+      case "task.started":
+        return detail ?? "Starting task…";
+      case "task.completed":
+        return null;
+      default:
+        continue;
+    }
+  }
+
+  return null;
+}
+
+const STATUS_LABEL_MAX_LENGTH = 80;
+
+function formatToolStatusLabel(
+  itemType: string | undefined,
+  summary: string,
+  detail: string | undefined,
+): string {
+  const verb = itemTypeToVerb(itemType);
+  if (detail) {
+    const truncated =
+      detail.length > STATUS_LABEL_MAX_LENGTH
+        ? `${detail.slice(0, STATUS_LABEL_MAX_LENGTH - 1)}…`
+        : detail;
+    return verb ? `${verb} ${truncated}` : truncated;
+  }
+  return verb ?? summary;
+}
+
+function itemTypeToVerb(itemType: string | undefined): string | null {
+  switch (itemType) {
+    case "command_execution":
+      return "Running";
+    case "file_change":
+      return "Editing";
+    case "mcp_tool_call":
+      return "Using tool";
+    case "dynamic_tool_call":
+      return "Using tool";
+    case "collab_agent_tool_call":
+      return "Agent";
+    case "web_search":
+      return "Searching";
+    case "image_view":
+      return "Viewing image";
+    default:
+      return null;
+  }
+}
+
 export function hasToolActivityForTurn(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   turnId: TurnId | null | undefined,

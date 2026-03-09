@@ -58,6 +58,7 @@ import { ProviderHealth } from "./provider/Services/ProviderHealth";
 import { CheckpointDiffQuery } from "./checkpointing/Services/CheckpointDiffQuery";
 import { clamp } from "effect/Number";
 import {
+  getThreadContextOccupancy,
   getThreadContextWindowSize,
 } from "./orchestration/Layers/ProviderRuntimeIngestion";
 import { getOAuthRateLimits } from "./oauthUsageApi";
@@ -745,9 +746,13 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
         const metrics = yield* projectionReadModelQuery.getSessionMetrics(threadId);
         // Merge in-memory ephemeral data (context window from SDK)
         const contextWindowSize = getThreadContextWindowSize(threadId);
+        // Prefer per-API-call context occupancy (actual window fill) over
+        // cumulative billing tokens which inflate when subagents are used.
+        const contextOccupancy = getThreadContextOccupancy(threadId);
+        const contextUsedTokens = contextOccupancy ?? metrics.contextUsedTokens;
         const contextUsagePercent =
-          metrics.contextUsedTokens !== null && contextWindowSize !== null && contextWindowSize > 0
-            ? (metrics.contextUsedTokens / contextWindowSize) * 100
+          contextUsedTokens !== null && contextWindowSize !== null && contextWindowSize > 0
+            ? (contextUsedTokens / contextWindowSize) * 100
             : null;
         // Fetch rate limits from Anthropic OAuth API (cached, 30s TTL)
         const oauthLimits = yield* Effect.promise(() => getOAuthRateLimits());
@@ -773,6 +778,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           : [];
         return {
           ...metrics,
+          contextUsedTokens: contextUsedTokens as typeof metrics.contextUsedTokens,
           contextWindowSize: contextWindowSize as typeof metrics.contextWindowSize,
           contextUsagePercent,
           rateLimits,

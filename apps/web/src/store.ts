@@ -21,6 +21,8 @@ export interface AppState {
   projects: Project[];
   threads: Thread[];
   threadsHydrated: boolean;
+  /** Custom project display order — array of ProjectId strings. */
+  projectOrder: string[];
 }
 
 const PERSISTED_STATE_KEY = "t3code:renderer-state:v8";
@@ -39,6 +41,7 @@ const initialState: AppState = {
   projects: [],
   threads: [],
   threadsHydrated: false,
+  projectOrder: [],
 };
 const persistedExpandedProjectCwds = new Set<string>();
 
@@ -49,14 +52,20 @@ function readPersistedState(): AppState {
   try {
     const raw = window.localStorage.getItem(PERSISTED_STATE_KEY);
     if (!raw) return initialState;
-    const parsed = JSON.parse(raw) as { expandedProjectCwds?: string[] };
+    const parsed = JSON.parse(raw) as {
+      expandedProjectCwds?: string[];
+      projectOrder?: string[];
+    };
     persistedExpandedProjectCwds.clear();
     for (const cwd of parsed.expandedProjectCwds ?? []) {
       if (typeof cwd === "string" && cwd.length > 0) {
         persistedExpandedProjectCwds.add(cwd);
       }
     }
-    return { ...initialState };
+    const projectOrder = Array.isArray(parsed.projectOrder)
+      ? parsed.projectOrder.filter((id): id is string => typeof id === "string" && id.length > 0)
+      : [];
+    return { ...initialState, projectOrder };
   } catch {
     return initialState;
   }
@@ -71,6 +80,7 @@ function persistState(state: AppState): void {
         expandedProjectCwds: state.projects
           .filter((project) => project.expanded)
           .map((project) => project.cwd),
+        projectOrder: state.projectOrder,
       }),
     );
     for (const legacyKey of LEGACY_PERSISTED_STATE_KEYS) {
@@ -396,6 +406,29 @@ export function setThreadBranch(
   return threads === state.threads ? state : { ...state, threads };
 }
 
+export function setProjectOrder(state: AppState, order: string[]): AppState {
+  return { ...state, projectOrder: order };
+}
+
+/**
+ * Apply the persisted custom order to projects.
+ *
+ * Projects present in `order` appear first (in that order).
+ * Projects not in `order` (newly added) are appended at the end.
+ */
+export function orderProjects(
+  projects: readonly Project[],
+  order: readonly string[],
+): Project[] {
+  if (order.length === 0 || projects.length <= 1) return [...projects];
+  const positionMap = new Map(order.map((id, index) => [id, index]));
+  return [...projects].sort((a, b) => {
+    const aPos = positionMap.get(a.id) ?? Number.MAX_SAFE_INTEGER;
+    const bPos = positionMap.get(b.id) ?? Number.MAX_SAFE_INTEGER;
+    return aPos - bPos;
+  });
+}
+
 // ── Zustand store ────────────────────────────────────────────────────
 
 interface AppStore extends AppState {
@@ -406,6 +439,7 @@ interface AppStore extends AppState {
   setProjectExpanded: (projectId: Project["id"], expanded: boolean) => void;
   setError: (threadId: ThreadId, error: string | null) => void;
   setThreadBranch: (threadId: ThreadId, branch: string | null, worktreePath: string | null) => void;
+  setProjectOrder: (order: string[]) => void;
 }
 
 export const useStore = create<AppStore>((set) => ({
@@ -420,6 +454,7 @@ export const useStore = create<AppStore>((set) => ({
   setError: (threadId, error) => set((state) => setError(state, threadId, error)),
   setThreadBranch: (threadId, branch, worktreePath) =>
     set((state) => setThreadBranch(state, threadId, branch, worktreePath)),
+  setProjectOrder: (order) => set((state) => setProjectOrder(state, order)),
 }));
 
 // Persist on every state change

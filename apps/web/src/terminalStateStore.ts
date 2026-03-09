@@ -13,6 +13,7 @@ import {
   DEFAULT_THREAD_TERMINAL_ID,
   MAX_THREAD_TERMINAL_COUNT,
   type ThreadTerminalGroup,
+  isProjectTerminalThreadId,
 } from "./types";
 
 interface ThreadTerminalState {
@@ -450,6 +451,8 @@ function updateTerminalStateByThreadId(
 interface TerminalStateStoreState {
   terminalStateByThreadId: Record<ThreadId, ThreadTerminalState>;
   setTerminalOpen: (threadId: ThreadId, open: boolean) => void;
+  /** Opens a project terminal, closing any other open project terminals first. */
+  setProjectTerminalOpen: (threadId: ThreadId, open: boolean) => void;
   setTerminalHeight: (threadId: ThreadId, height: number) => void;
   splitTerminal: (threadId: ThreadId, terminalId: string) => void;
   newTerminal: (threadId: ThreadId, terminalId: string) => void;
@@ -490,6 +493,30 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
         terminalStateByThreadId: {},
         setTerminalOpen: (threadId, open) =>
           updateTerminal(threadId, (state) => setThreadTerminalOpen(state, open)),
+        setProjectTerminalOpen: (threadId, open) =>
+          set((state) => {
+            let next = state.terminalStateByThreadId;
+            // Close all other open project terminals first
+            if (open) {
+              for (const existingThreadId of Object.keys(next) as ThreadId[]) {
+                if (
+                  existingThreadId !== threadId &&
+                  isProjectTerminalThreadId(existingThreadId) &&
+                  next[existingThreadId]?.terminalOpen
+                ) {
+                  next = updateTerminalStateByThreadId(next, existingThreadId, (s) =>
+                    setThreadTerminalOpen(s, false),
+                  );
+                }
+              }
+            }
+            // Now open/close the target project terminal
+            next = updateTerminalStateByThreadId(next, threadId, (s) =>
+              setThreadTerminalOpen(s, open),
+            );
+            if (next === state.terminalStateByThreadId) return state;
+            return { terminalStateByThreadId: next };
+          }),
         setTerminalHeight: (threadId, height) =>
           updateTerminal(threadId, (state) => setThreadTerminalHeight(state, height)),
         splitTerminal: (threadId, terminalId) =>
