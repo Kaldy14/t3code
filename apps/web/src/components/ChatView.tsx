@@ -323,10 +323,23 @@ function formatTaskTypeLabel(taskType: string | undefined): string {
       return "Worker";
     case "plan":
       return "Planner";
-    default:
-      // Capitalize and clean up unknown types
-      return taskType.replace(/[_-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    default: {
+      // Extract meaningful name from prefixed types like "oh-my-claudecode:explore"
+      const afterColon = taskType.includes(":") ? taskType.split(":").pop()! : taskType;
+      return afterColon.replace(/[_-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    }
   }
+}
+
+/** Returns the raw agent type slug when it's specific enough to be useful, or null. */
+function agentTypeSlug(taskType: string | undefined): string | null {
+  if (!taskType) return null;
+  if (taskType === "local_agent" || taskType === "plan") return null;
+  // For prefixed types like "oh-my-claudecode:explore", return "explore"
+  if (taskType.includes(":")) return taskType.split(":").pop()!;
+  // For other non-generic types, return as-is
+  if (taskType === "team_worker" || taskType === "teammate") return null;
+  return taskType;
 }
 
 function normalizePlanMarkdownForExport(planMarkdown: string): string {
@@ -358,6 +371,7 @@ function SubagentCard({
 
   const toolCount = subagent.usage?.toolUses ?? subagent.childActivities.length;
   const taskTypeLabel = formatTaskTypeLabel(subagent.taskType);
+  const slug = agentTypeSlug(subagent.taskType);
   const hasChildren = subagent.childActivities.length > 0;
 
   const accentColor = isRunning
@@ -408,17 +422,24 @@ function SubagentCard({
             </span>
           )}
 
-          {/* Label */}
-          <span
-            className={cn(
-              "text-[10px] font-medium uppercase tracking-[0.1em]",
-              isRunning && "text-blue-400/80",
-              isFailed && "text-rose-400/70",
-              isStopped && "text-amber-400/70",
-              isCompleted && "text-emerald-400/60",
+          {/* Label + agent name */}
+          <span className="flex shrink-0 items-center gap-1.5">
+            <span
+              className={cn(
+                "text-[10px] font-medium uppercase tracking-[0.1em]",
+                isRunning && "text-blue-400/80",
+                isFailed && "text-rose-400/70",
+                isStopped && "text-amber-400/70",
+                isCompleted && "text-emerald-400/60",
+              )}
+            >
+              {taskTypeLabel}
+            </span>
+            {slug && (
+              <span className="rounded bg-muted/50 px-1 py-px text-[9px] font-mono text-muted-foreground/45">
+                {slug}
+              </span>
             )}
-          >
-            {taskTypeLabel}
           </span>
 
           <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground/75">
@@ -4370,7 +4391,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   {/* Interaction mode toggle */}
                   <Button
                     variant="ghost"
-                    className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+                    className={cn(
+                      "shrink-0 whitespace-nowrap px-2 sm:px-3",
+                      interactionMode === "plan"
+                        ? "text-emerald-500/80 hover:text-emerald-500"
+                        : "text-muted-foreground/70 hover:text-foreground/80",
+                    )}
                     size="sm"
                     type="button"
                     onClick={toggleInteractionMode}
@@ -4390,27 +4416,37 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
 
                   {/* Runtime mode toggle */}
-                  <Button
-                    variant="ghost"
-                    className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
-                    size="sm"
-                    type="button"
-                    onClick={() =>
-                      void handleRuntimeModeChange(
-                        runtimeMode === "full-access" ? "approval-required" : "full-access",
-                      )
-                    }
-                    title={
-                      runtimeMode === "full-access"
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
+                        <Button
+                          variant="ghost"
+                          className={cn(
+                            "shrink-0",
+                            runtimeMode === "full-access"
+                              ? "text-amber-500/80 hover:text-amber-500"
+                              : "text-emerald-500/80 hover:text-emerald-500",
+                          )}
+                          size="icon-sm"
+                          type="button"
+                          onClick={() =>
+                            void handleRuntimeModeChange(
+                              runtimeMode === "full-access"
+                                ? "approval-required"
+                                : "full-access",
+                            )
+                          }
+                        />
+                      }
+                    >
+                      {runtimeMode === "full-access" ? <LockOpenIcon /> : <LockIcon />}
+                    </TooltipTrigger>
+                    <TooltipPopup side="top">
+                      {runtimeMode === "full-access"
                         ? "Full access — click to require approvals"
-                        : "Approval required — click for full access"
-                    }
-                  >
-                    {runtimeMode === "full-access" ? <LockOpenIcon /> : <LockIcon />}
-                    <span className="sr-only sm:not-sr-only">
-                      {runtimeMode === "full-access" ? "Full access" : "Supervised"}
-                    </span>
-                  </Button>
+                        : "Supervised — click for full access"}
+                    </TooltipPopup>
+                  </Tooltip>
 
                   {/* Env mode toggle (Local / New worktree) */}
                   {isGitRepo && (

@@ -11,8 +11,8 @@ const FAVICON_MIME_TYPES: Record<string, string> = {
 
 const FALLBACK_FAVICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="#6b728080" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-fallback="project-favicon"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-8l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z"/></svg>`;
 
-// Well-known favicon paths checked in order.
-const FAVICON_CANDIDATES = [
+// Well-known favicon paths checked relative to an app root.
+const FAVICON_RELATIVE_PATHS = [
   "favicon.svg",
   "favicon.ico",
   "favicon.png",
@@ -35,8 +35,8 @@ const FAVICON_CANDIDATES = [
   "assets/logo.png",
 ];
 
-// Files that may contain a <link rel="icon"> or icon metadata declaration.
-const ICON_SOURCE_FILES = [
+// Files that may contain a <link rel="icon"> or icon metadata declaration, relative to an app root.
+const ICON_SOURCE_RELATIVE_PATHS = [
   "index.html",
   "public/index.html",
   "app/routes/__root.tsx",
@@ -45,6 +45,9 @@ const ICON_SOURCE_FILES = [
   "src/root.tsx",
   "src/index.html",
 ];
+
+// Directories commonly containing sub-apps in monorepos.
+const MONOREPO_APP_DIRS = ["apps", "packages"];
 
 // Matches <link ...> tags or object-like icon metadata where rel/href can appear in any order.
 const LINK_ICON_HTML_RE =
@@ -95,6 +98,45 @@ function serveFallbackFavicon(res: http.ServerResponse): void {
   res.end(FALLBACK_FAVICON_SVG);
 }
 
+/**
+ * Discover immediate subdirectories inside a monorepo app directory.
+ * Returns absolute paths (e.g. ["/project/apps/web", "/project/apps/admin"]).
+ */
+function listSubDirs(parentDir: string, cb: (dirs: string[]) => void): void {
+  fs.readdir(parentDir, { withFileTypes: true }, (err, entries) => {
+    if (err || !entries) {
+      cb([]);
+      return;
+    }
+    cb(
+      entries
+        .filter((e) => e.isDirectory() && !e.name.startsWith("."))
+        .map((e) => path.join(parentDir, e.name)),
+    );
+  });
+}
+
+/**
+ * Collect all monorepo sub-app directories for the given project root.
+ * Scans MONOREPO_APP_DIRS (apps/, packages/) in parallel, then returns
+ * all discovered subdirectories.
+ */
+function collectMonorepoAppDirs(projectCwd: string, cb: (dirs: string[]) => void): void {
+  let pending = MONOREPO_APP_DIRS.length;
+  if (pending === 0) {
+    cb([]);
+    return;
+  }
+  const allDirs: string[] = [];
+  for (const dir of MONOREPO_APP_DIRS) {
+    listSubDirs(path.join(projectCwd, dir), (dirs) => {
+      allDirs.push(...dirs);
+      pending--;
+      if (pending === 0) cb(allDirs);
+    });
+  }
+}
+
 export function tryHandleProjectFaviconRequest(url: URL, res: http.ServerResponse): boolean {
   if (url.pathname !== "/api/project-favicon") {
     return false;
@@ -126,46 +168,94 @@ export function tryHandleProjectFaviconRequest(url: URL, res: http.ServerRespons
     });
   };
 
-  const trySourceFiles = (index: number): void => {
-    if (index >= ICON_SOURCE_FILES.length) {
-      serveFallbackFavicon(res);
+  /** Try favicon file candidates relative to a given root directory. */
+  const tryCandidatesIn = (
+    root: string,
+    candidates: string[],
+    index: number,
+    onExhausted: () => void,
+  ): void => {
+    if (index >= candidates.length) {
+      onExhausted();
       return;
     }
-    const sourceFile = path.join(projectCwd, ICON_SOURCE_FILES[index]!);
-    fs.readFile(sourceFile, "utf8", (err, content) => {
-      if (err) {
-        trySourceFiles(index + 1);
-        return;
-      }
-      const href = extractIconHref(content);
-      if (!href) {
-        trySourceFiles(index + 1);
-        return;
-      }
-      const candidates = resolveIconHref(projectCwd, href);
-      tryResolvedPaths(candidates, 0, () => trySourceFiles(index + 1));
-    });
-  };
-
-  const tryCandidates = (index: number): void => {
-    if (index >= FAVICON_CANDIDATES.length) {
-      trySourceFiles(0);
-      return;
-    }
-    const candidate = path.join(projectCwd, FAVICON_CANDIDATES[index]!);
+    const candidate = path.join(root, candidates[index]!);
     if (!isPathWithinProject(projectCwd, candidate)) {
-      tryCandidates(index + 1);
+      tryCandidatesIn(root, candidates, index + 1, onExhausted);
       return;
     }
     fs.stat(candidate, (err, stats) => {
       if (err || !stats?.isFile()) {
-        tryCandidates(index + 1);
+        tryCandidatesIn(root, candidates, index + 1, onExhausted);
         return;
       }
       serveFaviconFile(candidate, res);
     });
   };
 
-  tryCandidates(0);
+  /** Try source files that may contain icon link declarations relative to a given root. */
+  const trySourceFilesIn = (
+    root: string,
+    sourceFiles: string[],
+    index: number,
+    onExhausted: () => void,
+  ): void => {
+    if (index >= sourceFiles.length) {
+      onExhausted();
+      return;
+    }
+    const sourceFile = path.join(root, sourceFiles[index]!);
+    fs.readFile(sourceFile, "utf8", (err, content) => {
+      if (err) {
+        trySourceFilesIn(root, sourceFiles, index + 1, onExhausted);
+        return;
+      }
+      const href = extractIconHref(content);
+      if (!href) {
+        trySourceFilesIn(root, sourceFiles, index + 1, onExhausted);
+        return;
+      }
+      // Resolve href relative to the sub-app root first, then the project root.
+      const candidates = [...resolveIconHref(root, href), ...resolveIconHref(projectCwd, href)];
+      // Deduplicate while preserving order
+      const seen = new Set<string>();
+      const unique = candidates.filter((c) => {
+        if (seen.has(c)) return false;
+        seen.add(c);
+        return true;
+      });
+      tryResolvedPaths(unique, 0, () =>
+        trySourceFilesIn(root, sourceFiles, index + 1, onExhausted),
+      );
+    });
+  };
+
+  /** Search a single root directory for favicons (candidates first, then source files). */
+  const tryRoot = (root: string, onExhausted: () => void): void => {
+    tryCandidatesIn(root, FAVICON_RELATIVE_PATHS, 0, () => {
+      trySourceFilesIn(root, ICON_SOURCE_RELATIVE_PATHS, 0, onExhausted);
+    });
+  };
+
+  /** Iterate through a list of root directories. */
+  const tryRoots = (roots: string[], index: number, onExhausted: () => void): void => {
+    if (index >= roots.length) {
+      onExhausted();
+      return;
+    }
+    tryRoot(roots[index]!, () => tryRoots(roots, index + 1, onExhausted));
+  };
+
+  // 1. Try the project root first (existing behavior).
+  tryRoot(projectCwd, () => {
+    // 2. Discover monorepo sub-apps and try each one.
+    collectMonorepoAppDirs(projectCwd, (appDirs) => {
+      tryRoots(appDirs, 0, () => {
+        // 3. Nothing found — serve fallback.
+        serveFallbackFavicon(res);
+      });
+    });
+  });
+
   return true;
 }

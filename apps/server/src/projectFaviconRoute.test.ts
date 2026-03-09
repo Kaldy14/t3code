@@ -153,6 +153,70 @@ describe("tryHandleProjectFaviconRequest", () => {
     });
   });
 
+  it("discovers a favicon inside a monorepo sub-app directory", async () => {
+    const projectDir = makeTempDir("t3code-favicon-route-monorepo-");
+    // Simulate apps/web/public/favicon.ico in a monorepo
+    const iconPath = path.join(projectDir, "apps", "web", "public", "favicon.ico");
+    fs.mkdirSync(path.dirname(iconPath), { recursive: true });
+    fs.writeFileSync(iconPath, "fake-ico-data", "utf8");
+
+    await withRouteServer(async (baseUrl) => {
+      const pathname = `/api/project-favicon?cwd=${encodeURIComponent(projectDir)}`;
+      const response = await request(baseUrl, pathname);
+      expect(response.statusCode).toBe(200);
+      expect(response.contentType).toContain("image/x-icon");
+      expect(response.body).toBe("fake-ico-data");
+    });
+  });
+
+  it("discovers a favicon in a different monorepo sub-app (e.g. apps/admin)", async () => {
+    const projectDir = makeTempDir("t3code-favicon-route-monorepo-admin-");
+    const iconPath = path.join(projectDir, "apps", "admin", "public", "favicon.svg");
+    fs.mkdirSync(path.dirname(iconPath), { recursive: true });
+    fs.writeFileSync(iconPath, "<svg>admin</svg>", "utf8");
+
+    await withRouteServer(async (baseUrl) => {
+      const pathname = `/api/project-favicon?cwd=${encodeURIComponent(projectDir)}`;
+      const response = await request(baseUrl, pathname);
+      expect(response.statusCode).toBe(200);
+      expect(response.contentType).toContain("image/svg+xml");
+      expect(response.body).toBe("<svg>admin</svg>");
+    });
+  });
+
+  it("prefers root-level favicon over monorepo sub-app favicon", async () => {
+    const projectDir = makeTempDir("t3code-favicon-route-monorepo-priority-");
+    // Root-level favicon
+    fs.writeFileSync(path.join(projectDir, "favicon.svg"), "<svg>root</svg>", "utf8");
+    // Sub-app favicon
+    const subIcon = path.join(projectDir, "apps", "web", "public", "favicon.svg");
+    fs.mkdirSync(path.dirname(subIcon), { recursive: true });
+    fs.writeFileSync(subIcon, "<svg>sub</svg>", "utf8");
+
+    await withRouteServer(async (baseUrl) => {
+      const pathname = `/api/project-favicon?cwd=${encodeURIComponent(projectDir)}`;
+      const response = await request(baseUrl, pathname);
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toBe("<svg>root</svg>");
+    });
+  });
+
+  it("resolves icon href from source files in a monorepo sub-app", async () => {
+    const projectDir = makeTempDir("t3code-favicon-route-monorepo-source-");
+    const appDir = path.join(projectDir, "apps", "web");
+    const iconPath = path.join(appDir, "public", "brand", "logo.svg");
+    fs.mkdirSync(path.dirname(iconPath), { recursive: true });
+    fs.writeFileSync(path.join(appDir, "index.html"), '<link rel="icon" href="/brand/logo.svg">');
+    fs.writeFileSync(iconPath, "<svg>monorepo-brand</svg>", "utf8");
+
+    await withRouteServer(async (baseUrl) => {
+      const pathname = `/api/project-favicon?cwd=${encodeURIComponent(projectDir)}`;
+      const response = await request(baseUrl, pathname);
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toBe("<svg>monorepo-brand</svg>");
+    });
+  });
+
   it("serves a fallback favicon when no icon exists", async () => {
     const projectDir = makeTempDir("t3code-favicon-route-fallback-");
 
