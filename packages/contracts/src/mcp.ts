@@ -25,7 +25,11 @@ export const McpSseServerConfig = Schema.Struct({
 });
 export type McpSseServerConfig = typeof McpSseServerConfig.Type;
 
-export const McpServerConfig = Schema.Union([McpStdioServerConfig, McpHttpServerConfig, McpSseServerConfig]);
+export const McpServerConfig = Schema.Union([
+  McpStdioServerConfig,
+  McpHttpServerConfig,
+  McpSseServerConfig,
+]);
 export type McpServerConfig = typeof McpServerConfig.Type;
 
 // ── MCP Server Status ─────────────────────────────────────────────────

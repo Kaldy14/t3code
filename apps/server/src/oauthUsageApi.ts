@@ -66,7 +66,12 @@ function getClaudeConfigDir(): string {
  */
 function readOmcCache(): OAuthRateLimits | null {
   try {
-    const cachePath = join(getClaudeConfigDir(), "plugins", "oh-my-claudecode", ".usage-cache.json");
+    const cachePath = join(
+      getClaudeConfigDir(),
+      "plugins",
+      "oh-my-claudecode",
+      ".usage-cache.json",
+    );
     if (!existsSync(cachePath)) return null;
     const content = readFileSync(cachePath, "utf-8");
     const parsed = JSON.parse(content);
@@ -78,7 +83,8 @@ function readOmcCache(): OAuthRateLimits | null {
     // Must have data
     const data = parsed.data;
     if (!data || typeof data !== "object") return null;
-    if (typeof data.fiveHourPercent !== "number" && typeof data.weeklyPercent !== "number") return null;
+    if (typeof data.fiveHourPercent !== "number" && typeof data.weeklyPercent !== "number")
+      return null;
 
     const parseDate = (dateStr: unknown): number | null => {
       if (typeof dateStr !== "string") return null;
@@ -233,7 +239,12 @@ export async function getOAuthRateLimits(): Promise<OAuthRateLimits | null> {
   // 1. Try OMC's shared cache (fast, no network, no 429 risk)
   const omcData = readOmcCache();
   if (omcData) {
-    cachedResult = { data: omcData, timestamp: Date.now(), ttl: CACHE_TTL_SUCCESS_MS, rateLimitedCount: 0 };
+    cachedResult = {
+      data: omcData,
+      timestamp: Date.now(),
+      ttl: CACHE_TTL_SUCCESS_MS,
+      rateLimitedCount: 0,
+    };
     return omcData;
   }
 
@@ -245,7 +256,12 @@ export async function getOAuthRateLimits(): Promise<OAuthRateLimits | null> {
   // 3. Fallback: direct API call
   const creds = getCredentials();
   if (!creds) {
-    cachedResult = { data: null, timestamp: Date.now(), ttl: CACHE_TTL_FAILURE_MS, rateLimitedCount: 0 };
+    cachedResult = {
+      data: null,
+      timestamp: Date.now(),
+      ttl: CACHE_TTL_FAILURE_MS,
+      rateLimitedCount: 0,
+    };
     return null;
   }
 
@@ -254,18 +270,36 @@ export async function getOAuthRateLimits(): Promise<OAuthRateLimits | null> {
   if (result.rateLimited) {
     const prevCount = cachedResult?.rateLimitedCount ?? 0;
     const newCount = prevCount + 1;
-    const backoffTtl = Math.min(CACHE_TTL_RATE_LIMITED_MS * 2 ** (newCount - 1), MAX_RATE_LIMITED_BACKOFF_MS);
+    const backoffTtl = Math.min(
+      CACHE_TTL_RATE_LIMITED_MS * 2 ** (newCount - 1),
+      MAX_RATE_LIMITED_BACKOFF_MS,
+    );
     const staleData = cachedResult?.data ?? null;
-    cachedResult = { data: staleData, timestamp: Date.now(), ttl: backoffTtl, rateLimitedCount: newCount };
+    cachedResult = {
+      data: staleData,
+      timestamp: Date.now(),
+      ttl: backoffTtl,
+      rateLimitedCount: newCount,
+    };
     return staleData;
   }
 
   if (!result.data) {
-    cachedResult = { data: null, timestamp: Date.now(), ttl: CACHE_TTL_FAILURE_MS, rateLimitedCount: 0 };
+    cachedResult = {
+      data: null,
+      timestamp: Date.now(),
+      ttl: CACHE_TTL_FAILURE_MS,
+      rateLimitedCount: 0,
+    };
     return null;
   }
 
   const parsed = parseResponse(result.data);
-  cachedResult = { data: parsed, timestamp: Date.now(), ttl: CACHE_TTL_SUCCESS_MS, rateLimitedCount: 0 };
+  cachedResult = {
+    data: parsed,
+    timestamp: Date.now(),
+    ttl: CACHE_TTL_SUCCESS_MS,
+    rateLimitedCount: 0,
+  };
   return parsed;
 }

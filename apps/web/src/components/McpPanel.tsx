@@ -69,11 +69,7 @@ interface McpServerRowProps {
   onRemove?: (serverName: string) => void;
 }
 
-const McpServerRow = memo(function McpServerRow({
-  server,
-  threadId,
-  onRemove,
-}: McpServerRowProps) {
+const McpServerRow = memo(function McpServerRow({ server, threadId, onRemove }: McpServerRowProps) {
   const queryClient = useQueryClient();
   const [expanded, setExpanded] = useState(false);
 
@@ -127,9 +123,7 @@ const McpServerRow = memo(function McpServerRow({
 
           {/* Name + scope + status */}
           <div className="flex min-w-0 flex-1 items-center gap-1.5">
-            <span className="truncate text-sm font-medium text-foreground">
-              {server.name}
-            </span>
+            <span className="truncate text-sm font-medium text-foreground">{server.name}</span>
             {server.scope && (
               <Badge
                 variant="outline"
@@ -155,9 +149,7 @@ const McpServerRow = memo(function McpServerRow({
 
           {/* Tool count expand trigger */}
           {toolCount > 0 && (
-            <CollapsibleTrigger
-              className="flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-[11px] tabular-nums text-muted-foreground hover:text-foreground"
-            >
+            <CollapsibleTrigger className="flex shrink-0 items-center gap-0.5 rounded px-1 py-0.5 text-[11px] tabular-nums text-muted-foreground hover:text-foreground">
               <WrenchIcon className="size-3 opacity-60" />
               {toolCount}
               <ChevronRightIcon
@@ -184,10 +176,7 @@ const McpServerRow = memo(function McpServerRow({
                   }
                 >
                   <RefreshCwIcon
-                    className={cn(
-                      "size-3",
-                      reconnectMutation.isPending && "animate-spin",
-                    )}
+                    className={cn("size-3", reconnectMutation.isPending && "animate-spin")}
                   />
                 </TooltipTrigger>
                 <TooltipPopup>Reconnect</TooltipPopup>
@@ -198,11 +187,7 @@ const McpServerRow = memo(function McpServerRow({
               <Tooltip>
                 <TooltipTrigger
                   render={
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      onClick={() => onRemove(server.name)}
-                    />
+                    <Button variant="ghost" size="icon-xs" onClick={() => onRemove(server.name)} />
                   }
                 >
                   <Trash2Icon className="size-3 text-destructive-foreground/70" />
@@ -398,9 +383,7 @@ const AddServerForm = memo(function AddServerForm({
 
       {/* Error */}
       {addMutation.error && (
-        <p className="text-[11px] text-destructive-foreground">
-          {addMutation.error.message}
-        </p>
+        <p className="text-[11px] text-destructive-foreground">{addMutation.error.message}</p>
       )}
 
       {/* Submit */}
@@ -480,9 +463,7 @@ export const McpPanel = memo(function McpPanel({ threadId }: McpPanelProps) {
       <PopoverPopup side="bottom" align="end" sideOffset={8} className="w-80">
         {/* Header */}
         <div className="flex items-center justify-between pb-2">
-          <span className="text-sm font-semibold text-foreground">
-            MCP Servers
-          </span>
+          <span className="text-sm font-semibold text-foreground">MCP Servers</span>
           {totalCount > 0 && (
             <Badge variant="outline" size="sm">
               {connectedCount} of {totalCount} connected
@@ -515,10 +496,7 @@ export const McpPanel = memo(function McpPanel({ threadId }: McpPanelProps) {
           ))}
 
           {/* Add server form */}
-          <AddServerForm
-            threadId={threadId}
-            existingDynamicServers={dynamicServerConfigs}
-          />
+          <AddServerForm threadId={threadId} existingDynamicServers={dynamicServerConfigs} />
         </div>
       </PopoverPopup>
     </Popover>

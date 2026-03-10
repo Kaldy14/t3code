@@ -533,11 +533,7 @@ function toSessionError(
   return undefined;
 }
 
-function toRequestError(
-  threadId: ThreadId,
-  method: string,
-  cause: unknown,
-): ProviderAdapterError {
+function toRequestError(threadId: ThreadId, method: string, cause: unknown): ProviderAdapterError {
   const sessionError = toSessionError(threadId, cause);
   if (sessionError) {
     return sessionError;
@@ -721,41 +717,43 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         const observedAt = new Date().toISOString();
         const itemId = sdkNativeItemId(message);
 
-        yield* nativeEventLogger
-          .write(
-            {
-              observedAt,
-              event: {
-                id:
-                  "uuid" in message && typeof message.uuid === "string"
-                    ? message.uuid
-                    : crypto.randomUUID(),
-                kind: "notification",
-                provider: PROVIDER,
-                createdAt: observedAt,
-                method: sdkNativeMethod(message),
-                threadId: context.internalThreadId,
-                ...(typeof message.session_id === "string"
-                  ? { providerThreadId: message.session_id }
-                  : {}),
-                ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
-                ...(itemId ? { itemId: ProviderItemId.makeUnsafe(itemId) } : {}),
-                payload: message,
-              },
+        yield* nativeEventLogger.write(
+          {
+            observedAt,
+            event: {
+              id:
+                "uuid" in message && typeof message.uuid === "string"
+                  ? message.uuid
+                  : crypto.randomUUID(),
+              kind: "notification",
+              provider: PROVIDER,
+              createdAt: observedAt,
+              method: sdkNativeMethod(message),
+              threadId: context.internalThreadId,
+              ...(typeof message.session_id === "string"
+                ? { providerThreadId: message.session_id }
+                : {}),
+              ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+              ...(itemId ? { itemId: ProviderItemId.makeUnsafe(itemId) } : {}),
+              payload: message,
             },
-            null,
-          );
+          },
+          null,
+        );
       });
 
     const snapshotThread = (
       context: ClaudeSessionContext,
-    ): Effect.Effect<{
-      threadId: ThreadId;
-      turns: ReadonlyArray<{
-        id: TurnId;
-        items: ReadonlyArray<unknown>;
-      }>;
-    }, ProviderAdapterValidationError> =>
+    ): Effect.Effect<
+      {
+        threadId: ThreadId;
+        turns: ReadonlyArray<{
+          id: TurnId;
+          items: ReadonlyArray<unknown>;
+        }>;
+      },
+      ProviderAdapterValidationError
+    > =>
       Effect.gen(function* () {
         const threadId = context.session.threadId;
         if (!threadId) {
@@ -975,7 +973,11 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         // When the turn was started in plan mode and completed successfully,
         // emit a proposed-plan event so the ingestion pipeline creates a
         // first-class proposed plan that the UI can present for review.
-        if (turnState.isPlanMode && status === "completed" && turnState.fallbackAssistantText.length > 0) {
+        if (
+          turnState.isPlanMode &&
+          status === "completed" &&
+          turnState.fallbackAssistantText.length > 0
+        ) {
           const planStamp = yield* makeEventStamp();
           yield* offerRuntimeEvent({
             type: "turn.proposed.completed",
@@ -1046,7 +1048,10 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
 
         if (event.type === "content_block_delta") {
           // Accumulate input_json_delta chunks for tool input re-summarization
-          if (event.delta.type === "input_json_delta" && typeof event.delta.partial_json === "string") {
+          if (
+            event.delta.type === "input_json_delta" &&
+            typeof event.delta.partial_json === "string"
+          ) {
             const tool = context.inFlightTools.get(event.index);
             if (tool) {
               tool.inputJsonChunks.push(event.delta.partial_json);
@@ -1163,7 +1168,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
             type: "item.started",
             eventId: stamp.eventId,
             provider: PROVIDER,
-              createdAt: stamp.createdAt,
+            createdAt: stamp.createdAt,
             threadId: context.internalThreadId,
             ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
             itemId: asRuntimeItemId(tool.itemId),
@@ -1217,7 +1222,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
             type: "item.completed",
             eventId: stamp.eventId,
             provider: PROVIDER,
-              createdAt: stamp.createdAt,
+            createdAt: stamp.createdAt,
             threadId: context.internalThreadId,
             ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
             itemId: asRuntimeItemId(tool.itemId),
@@ -1279,7 +1284,8 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           if (message.parent_tool_use_id === null) {
             const betaUsage = (message.message as { usage?: Record<string, unknown> })?.usage;
             if (betaUsage) {
-              const inputTokens = typeof betaUsage.input_tokens === "number" ? betaUsage.input_tokens : 0;
+              const inputTokens =
+                typeof betaUsage.input_tokens === "number" ? betaUsage.input_tokens : 0;
               const cacheCreation =
                 typeof betaUsage.cache_creation_input_tokens === "number"
                   ? betaUsage.cache_creation_input_tokens
@@ -1668,7 +1674,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
             type: "request.resolved",
             eventId: stamp.eventId,
             provider: PROVIDER,
-              createdAt: stamp.createdAt,
+            createdAt: stamp.createdAt,
             threadId: context.internalThreadId,
             ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
             requestId: asRuntimeRequestId(requestId),
@@ -1717,7 +1723,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
             type: "session.exited",
             eventId: stamp.eventId,
             provider: PROVIDER,
-              createdAt: stamp.createdAt,
+            createdAt: stamp.createdAt,
             threadId: context.internalThreadId,
             payload: {
               reason: "Session stopped",
@@ -1730,18 +1736,13 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         sessions.delete(context.internalThreadId);
       });
 
-    const findSession = (
-      threadId: ThreadId | undefined,
-    ): ClaudeSessionContext | undefined => {
+    const findSession = (threadId: ThreadId | undefined): ClaudeSessionContext | undefined => {
       if (threadId !== undefined) {
         const direct = sessions.get(threadId);
         if (direct) return direct;
       }
       for (const ctx of sessions.values()) {
-        if (
-          ctx.internalThreadId === threadId ||
-          ctx.session.threadId === threadId
-        ) {
+        if (ctx.internalThreadId === threadId || ctx.session.threadId === threadId) {
           return ctx;
         }
       }
@@ -1840,12 +1841,16 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                   provider: PROVIDER,
                   createdAt: stamp.createdAt,
                   threadId: context.internalThreadId,
-                  ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+                  ...(context.turnState
+                    ? { turnId: asCanonicalTurnId(context.turnState.turnId) }
+                    : {}),
                   requestId: asRuntimeRequestId(requestId),
                   payload: { questions },
                   providerRefs: {
                     ...providerThreadRef(context),
-                    ...(context.turnState ? { providerTurnId: String(context.turnState.turnId) } : {}),
+                    ...(context.turnState
+                      ? { providerTurnId: String(context.turnState.turnId) }
+                      : {}),
                     providerRequestId: requestId,
                   },
                   raw: {
@@ -1899,9 +1904,11 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                 type: "request.opened",
                 eventId: requestedStamp.eventId,
                 provider: PROVIDER,
-                      createdAt: requestedStamp.createdAt,
+                createdAt: requestedStamp.createdAt,
                 threadId: context.internalThreadId,
-                ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+                ...(context.turnState
+                  ? { turnId: asCanonicalTurnId(context.turnState.turnId) }
+                  : {}),
                 requestId: asRuntimeRequestId(requestId),
                 payload: {
                   requestType,
@@ -1913,10 +1920,12 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                   },
                 },
                 providerRefs: {
-                      ...(context.session.threadId
+                  ...(context.session.threadId
                     ? { providerThreadId: context.session.threadId }
                     : {}),
-                  ...(context.turnState ? { providerTurnId: String(context.turnState.turnId) } : {}),
+                  ...(context.turnState
+                    ? { providerTurnId: String(context.turnState.turnId) }
+                    : {}),
                   providerRequestId: requestId,
                 },
                 raw: {
@@ -1951,19 +1960,23 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                 type: "request.resolved",
                 eventId: resolvedStamp.eventId,
                 provider: PROVIDER,
-                      createdAt: resolvedStamp.createdAt,
+                createdAt: resolvedStamp.createdAt,
                 threadId: context.internalThreadId,
-                ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+                ...(context.turnState
+                  ? { turnId: asCanonicalTurnId(context.turnState.turnId) }
+                  : {}),
                 requestId: asRuntimeRequestId(requestId),
                 payload: {
                   requestType,
                   decision,
                 },
                 providerRefs: {
-                      ...(context.session.threadId
+                  ...(context.session.threadId
                     ? { providerThreadId: context.session.threadId }
                     : {}),
-                  ...(context.turnState ? { providerTurnId: String(context.turnState.turnId) } : {}),
+                  ...(context.turnState
+                    ? { providerTurnId: String(context.turnState.turnId) }
+                    : {}),
                   providerRequestId: requestId,
                 },
                 raw: {
@@ -2024,14 +2037,18 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                 provider: PROVIDER,
                 createdAt: stamp.createdAt,
                 threadId: context.internalThreadId,
-                ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+                ...(context.turnState
+                  ? { turnId: asCanonicalTurnId(context.turnState.turnId) }
+                  : {}),
                 requestId: asRuntimeRequestId(requestId),
                 payload: {
                   questions,
                 },
                 providerRefs: {
                   ...providerThreadRef(context),
-                  ...(context.turnState ? { providerTurnId: String(context.turnState.turnId) } : {}),
+                  ...(context.turnState
+                    ? { providerTurnId: String(context.turnState.turnId) }
+                    : {}),
                   providerRequestId: requestId,
                 },
                 raw: {
@@ -2071,9 +2088,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         const queryOptions: ClaudeQueryOptions = {
           ...(input.cwd ? { cwd: input.cwd } : {}),
           ...(input.model ? { model: input.model } : {}),
-          ...(claudeBinaryPath
-            ? { pathToClaudeCodeExecutable: claudeBinaryPath }
-            : {}),
+          ...(claudeBinaryPath ? { pathToClaudeCodeExecutable: claudeBinaryPath } : {}),
           ...(permissionMode ? { permissionMode } : {}),
           ...(permissionMode === "bypassPermissions"
             ? { allowDangerouslySkipPermissions: true }
@@ -2338,10 +2353,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         const pendingQuestion = context.pendingUserQuestions.get(requestId);
         if (pendingQuestion) {
           context.pendingUserQuestions.delete(requestId);
-          yield* Deferred.succeed(
-            pendingQuestion.decision,
-            answers as Record<string, string>,
-          );
+          yield* Deferred.succeed(pendingQuestion.decision, answers as Record<string, string>);
 
           const stamp = yield* makeEventStamp();
           yield* offerRuntimeEvent({
@@ -2469,7 +2481,10 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         return result as unknown as McpSetServersResult;
       });
 
-    const mcpReconnectServer: ClaudeCodeAdapterShape["mcpReconnectServer"] = (threadId, serverName) =>
+    const mcpReconnectServer: ClaudeCodeAdapterShape["mcpReconnectServer"] = (
+      threadId,
+      serverName,
+    ) =>
       Effect.gen(function* () {
         const context = yield* requireSession(threadId);
         yield* Effect.tryPromise({
@@ -2483,7 +2498,11 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         });
       });
 
-    const mcpToggleServer: ClaudeCodeAdapterShape["mcpToggleServer"] = (threadId, serverName, enabled) =>
+    const mcpToggleServer: ClaudeCodeAdapterShape["mcpToggleServer"] = (
+      threadId,
+      serverName,
+      enabled,
+    ) =>
       Effect.gen(function* () {
         const context = yield* requireSession(threadId);
         yield* Effect.tryPromise({
@@ -2545,9 +2564,12 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
   });
 }
 
-export function mapAskUserQuestionToUserInputQuestions(
-  toolInput: Record<string, unknown>,
-): Array<{ id: string; header: string; question: string; options: Array<{ label: string; description: string }> }> {
+export function mapAskUserQuestionToUserInputQuestions(toolInput: Record<string, unknown>): Array<{
+  id: string;
+  header: string;
+  question: string;
+  options: Array<{ label: string; description: string }>;
+}> {
   const questions = Array.isArray(toolInput.questions) ? toolInput.questions : [];
   if (questions.length === 0) {
     return [{ id: "question", header: "Question", question: "Please respond", options: [] }];
@@ -2558,7 +2580,9 @@ export function mapAskUserQuestionToUserInputQuestions(
     const header = typeof q.header === "string" ? q.header : "Question";
     const rawOptions = Array.isArray(q.options) ? q.options : [];
     const options = rawOptions
-      .filter((opt: unknown): opt is Record<string, unknown> => typeof opt === "object" && opt !== null)
+      .filter(
+        (opt: unknown): opt is Record<string, unknown> => typeof opt === "object" && opt !== null,
+      )
       .map((opt: Record<string, unknown>) => ({
         label: typeof opt.label === "string" ? opt.label : "",
         description: typeof opt.description === "string" ? opt.description : "",
@@ -2570,9 +2594,16 @@ export function mapAskUserQuestionToUserInputQuestions(
   });
 }
 
-export function mapElicitationToUserInputQuestions(
-  request: { serverName: string; message: string; requestedSchema?: Record<string, unknown> },
-): Array<{ id: string; header: string; question: string; options: Array<{ label: string; description: string }> }> {
+export function mapElicitationToUserInputQuestions(request: {
+  serverName: string;
+  message: string;
+  requestedSchema?: Record<string, unknown>;
+}): Array<{
+  id: string;
+  header: string;
+  question: string;
+  options: Array<{ label: string; description: string }>;
+}> {
   const header = `MCP: ${request.serverName}`;
   const schema = request.requestedSchema;
 

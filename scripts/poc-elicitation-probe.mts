@@ -179,16 +179,16 @@ function handleMessage(message: SDKMessage) {
       // Skip content deltas (too verbose)
       return;
     }
-    console.log(
-      `${LOG_PREFIX.stream} ${event?.type ?? message.type}`,
-    );
+    console.log(`${LOG_PREFIX.stream} ${event?.type ?? message.type}`);
   }
 }
 
 async function main() {
   console.log(`${LOG_PREFIX.info} Starting elicitation probe...`);
   console.log(`${LOG_PREFIX.info} CWD: ${CWD}`);
-  console.log(`${LOG_PREFIX.info} Waiting for SDK messages. Send a prompt that triggers an MCP elicitation.`);
+  console.log(
+    `${LOG_PREFIX.info} Waiting for SDK messages. Send a prompt that triggers an MCP elicitation.`,
+  );
   console.log(`${LOG_PREFIX.info} Press Ctrl+C to stop and see the elicitation log summary.\n`);
 
   // Create a simple prompt iterator that reads from stdin

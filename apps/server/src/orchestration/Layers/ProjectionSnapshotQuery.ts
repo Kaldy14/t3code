@@ -664,9 +664,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
             ),
           ]);
 
-          const totals = totalsOption._tag === "Some"
-            ? totalsOption.value
-            : { turnCount: 0, totalInputTokens: 0, totalOutputTokens: 0, totalCostUsd: 0 };
+          const totals =
+            totalsOption._tag === "Some"
+              ? totalsOption.value
+              : { turnCount: 0, totalInputTokens: 0, totalOutputTokens: 0, totalCostUsd: 0 };
 
           const latestTurn = latestTurnOption._tag === "Some" ? latestTurnOption.value : null;
 
@@ -688,11 +689,21 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               : null;
 
           const metrics: OrchestrationSessionMetrics = {
-            turnCount: Math.max(0, Math.trunc(totals.turnCount)) as OrchestrationSessionMetrics["turnCount"],
-            totalInputTokens: Math.max(0, Math.trunc(totals.totalInputTokens)) as OrchestrationSessionMetrics["totalInputTokens"],
-            totalOutputTokens: Math.max(0, Math.trunc(totals.totalOutputTokens)) as OrchestrationSessionMetrics["totalOutputTokens"],
+            turnCount: Math.max(
+              0,
+              Math.trunc(totals.turnCount),
+            ) as OrchestrationSessionMetrics["turnCount"],
+            totalInputTokens: Math.max(
+              0,
+              Math.trunc(totals.totalInputTokens),
+            ) as OrchestrationSessionMetrics["totalInputTokens"],
+            totalOutputTokens: Math.max(
+              0,
+              Math.trunc(totals.totalOutputTokens),
+            ) as OrchestrationSessionMetrics["totalOutputTokens"],
             totalCostUsd: totals.totalCostUsd,
-            contextUsedTokens: contextUsedTokens as OrchestrationSessionMetrics["contextUsedTokens"],
+            contextUsedTokens:
+              contextUsedTokens as OrchestrationSessionMetrics["contextUsedTokens"],
             contextWindowSize,
             contextUsagePercent,
             rateLimits: [],

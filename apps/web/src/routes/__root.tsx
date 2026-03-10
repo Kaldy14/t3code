@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-router";
 import { useEffect, useRef } from "react";
 import { QueryClient, useQueryClient } from "@tanstack/react-query";
+import { Throttler } from "@tanstack/react-pacer";
 
 import { APP_DISPLAY_NAME } from "../branding";
 import { Button } from "../components/ui/button";
@@ -20,7 +21,11 @@ import { useTerminalStateStore } from "../terminalStateStore";
 import { preferredTerminalEditor } from "../terminal-links";
 import { terminalRunningSubprocessFromEvent } from "../terminalActivity";
 import { onServerConfigUpdated, onServerWelcome } from "../wsNativeApi";
-import { dispatchActivityNotification, dispatchSessionSetNotification, requestNotificationPermission } from "../lib/notifications";
+import {
+  dispatchActivityNotification,
+  dispatchSessionSetNotification,
+  requestNotificationPermission,
+} from "../lib/notifications";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
 
@@ -155,7 +160,11 @@ function EventRouter() {
     let latestSequence = 0;
     let syncing = false;
     let pending = false;
-    const sessionStatusByThread = new Map<string, import("@t3tools/contracts").OrchestrationSessionStatus>();
+    let needsProviderInvalidation = false;
+    const sessionStatusByThread = new Map<
+      string,
+      import("@t3tools/contracts").OrchestrationSessionStatus
+    >();
 
     const flushSnapshotSync = async (): Promise<void> => {
       const snapshot = await api.orchestration.getSnapshot();
@@ -192,7 +201,20 @@ function EventRouter() {
       syncing = false;
     };
 
-    void syncSnapshot().catch(() => undefined);
+    const domainEventFlushThrottler = new Throttler(
+      () => {
+        if (needsProviderInvalidation) {
+          needsProviderInvalidation = false;
+          void queryClient.invalidateQueries({ queryKey: providerQueryKeys.all });
+        }
+        void syncSnapshot();
+      },
+      {
+        wait: 100,
+        leading: false,
+        trailing: true,
+      },
+    );
 
     const unsubDomainEvent = api.orchestration.onDomainEvent((event) => {
       if (event.sequence <= latestSequence) {
@@ -200,9 +222,9 @@ function EventRouter() {
       }
       latestSequence = event.sequence;
       if (event.type === "thread.turn-diff-completed" || event.type === "thread.reverted") {
-        void queryClient.invalidateQueries({ queryKey: providerQueryKeys.all });
+        needsProviderInvalidation = true;
       }
-      void syncSnapshot();
+      domainEventFlushThrottler.maybeExecute();
       if (event.type === "thread.activity-appended") {
         const threads = useStore.getState().threads;
         const thread = threads.find((t) => t.id === event.payload.threadId);
@@ -217,9 +239,15 @@ function EventRouter() {
         sessionStatusByThread.set(threadId, session.status);
         const threads = useStore.getState().threads;
         const thread = threads.find((t) => t.id === threadId);
-        dispatchSessionSetNotification(threadId, thread?.title ?? "Thread", session.status, previousStatus, () => {
-          void navigate({ to: "/$threadId", params: { threadId } });
-        });
+        dispatchSessionSetNotification(
+          threadId,
+          thread?.title ?? "Thread",
+          session.status,
+          previousStatus,
+          () => {
+            void navigate({ to: "/$threadId", params: { threadId } });
+          },
+        );
       }
     });
     const unsubTerminalEvent = api.terminal.onEvent((event) => {
@@ -305,6 +333,8 @@ function EventRouter() {
     });
     return () => {
       disposed = true;
+      needsProviderInvalidation = false;
+      domainEventFlushThrottler.cancel();
       unsubDomainEvent();
       unsubTerminalEvent();
       unsubWelcome();

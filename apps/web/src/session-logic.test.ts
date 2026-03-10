@@ -474,10 +474,7 @@ describe("deriveWorkLogEntries", () => {
     ];
 
     const [entry] = deriveWorkLogEntries(activities, undefined);
-    expect(entry?.changedFiles).toEqual([
-      "apps/web/src/components/ChatView.tsx",
-      "apps/web/src/session-logic.ts",
-    ]);
+    expect(entry?.changedFiles).toEqual(["src/components/ChatView.tsx", "src/session-logic.ts"]);
   });
 });
 

@@ -276,9 +276,7 @@ export function getReasoningEffortOptions(
 
 export function getDefaultReasoningEffort(provider: "codex"): CodexReasoningEffort;
 export function getDefaultReasoningEffort(provider: ProviderKind): ProviderEffort | null;
-export function getDefaultReasoningEffort(
-  provider: ProviderKind = "codex",
-): ProviderEffort | null {
+export function getDefaultReasoningEffort(provider: ProviderKind = "codex"): ProviderEffort | null {
   return DEFAULT_REASONING_EFFORT_BY_PROVIDER[provider];
 }
 

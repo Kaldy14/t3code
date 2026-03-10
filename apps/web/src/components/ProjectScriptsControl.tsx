@@ -459,9 +459,7 @@ export default function ProjectScriptsControl({
                 <span>Run in project terminal</span>
                 <Switch
                   checked={terminalTarget === "project"}
-                  onCheckedChange={(checked) =>
-                    setTerminalTarget(checked ? "project" : "thread")
-                  }
+                  onCheckedChange={(checked) => setTerminalTarget(checked ? "project" : "thread")}
                 />
               </label>
               <label className="flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm">

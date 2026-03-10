@@ -191,19 +191,13 @@ describe("mapElicitationToUserInputQuestions", () => {
 
 describe("mapAnswersToElicitationContent", () => {
   it("passes through answers unchanged when no schema", () => {
-    const result = mapAnswersToElicitationContent(
-      { name: "Alice", age: "30" },
-      undefined,
-    );
+    const result = mapAnswersToElicitationContent({ name: "Alice", age: "30" }, undefined);
 
     expect(result).toEqual({ name: "Alice", age: "30" });
   });
 
   it("passes through answers when schema has no properties", () => {
-    const result = mapAnswersToElicitationContent(
-      { name: "Alice" },
-      { type: "object" },
-    );
+    const result = mapAnswersToElicitationContent({ name: "Alice" }, { type: "object" });
 
     expect(result).toEqual({ name: "Alice" });
   });

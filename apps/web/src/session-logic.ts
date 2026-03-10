@@ -8,7 +8,13 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 
-import type { ChatMessage, ProposedPlan, SessionPhase, ThreadSession, TurnDiffSummary } from "./types";
+import type {
+  ChatMessage,
+  ProposedPlan,
+  SessionPhase,
+  ThreadSession,
+  TurnDiffSummary,
+} from "./types";
 
 export type ProviderPickerKind = ProviderKind | "claudeCode" | "cursor";
 
@@ -157,9 +163,7 @@ export function deriveActiveWorkStartedAt(
   return sendStartedAt;
 }
 
-function requestKindFromRequestType(
-  requestType: unknown,
-): PendingApproval["requestKind"] | null {
+function requestKindFromRequestType(requestType: unknown): PendingApproval["requestKind"] | null {
   switch (requestType) {
     case "command_execution_approval":
     case "exec_command_approval":
@@ -349,9 +353,7 @@ export function deriveActivePlanState(
         return null;
       }
       const status =
-        record.status === "completed" || record.status === "inProgress"
-          ? record.status
-          : "pending";
+        record.status === "completed" || record.status === "inProgress" ? record.status : "pending";
       return {
         step: record.step,
         status,
@@ -371,7 +373,9 @@ export function deriveActivePlanState(
   return {
     createdAt: latest.createdAt,
     turnId: latest.turnId,
-    ...(payload && "explanation" in payload ? { explanation: payload.explanation as string | null } : {}),
+    ...(payload && "explanation" in payload
+      ? { explanation: payload.explanation as string | null }
+      : {}),
     steps,
   };
 }
@@ -423,37 +427,39 @@ export function deriveWorkLogEntries(
   latestTurnId: TurnId | undefined,
 ): WorkLogEntry[] {
   const ordered = [...activities].toSorted(compareActivitiesByOrder);
-  return ordered
-    .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
-    .filter((activity) => activity.kind !== "tool.started")
-    .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")
-    .filter((activity) => activity.summary !== "Checkpoint captured")
-    // Exclude activities that belong to a subagent group (rendered separately)
-    .filter((activity) => !activity.taskId)
-    .map((activity) => {
-      const payload =
-        activity.payload && typeof activity.payload === "object"
-          ? (activity.payload as Record<string, unknown>)
-          : null;
-      const command = extractToolCommand(payload);
-      const changedFiles = extractChangedFiles(payload);
-      const entry: WorkLogEntry = {
-        id: activity.id,
-        createdAt: activity.createdAt,
-        label: activity.summary,
-        tone: activity.tone === "approval" ? "info" : activity.tone,
-      };
-      if (payload && typeof payload.detail === "string" && payload.detail.length > 0) {
-        entry.detail = payload.detail;
-      }
-      if (command) {
-        entry.command = command;
-      }
-      if (changedFiles.length > 0) {
-        entry.changedFiles = changedFiles.map(shortenAbsolutePath);
-      }
-      return entry;
-    });
+  return (
+    ordered
+      .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
+      .filter((activity) => activity.kind !== "tool.started")
+      .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")
+      .filter((activity) => activity.summary !== "Checkpoint captured")
+      // Exclude activities that belong to a subagent group (rendered separately)
+      .filter((activity) => !activity.taskId)
+      .map((activity) => {
+        const payload =
+          activity.payload && typeof activity.payload === "object"
+            ? (activity.payload as Record<string, unknown>)
+            : null;
+        const command = extractToolCommand(payload);
+        const changedFiles = extractChangedFiles(payload);
+        const entry: WorkLogEntry = {
+          id: activity.id,
+          createdAt: activity.createdAt,
+          label: activity.summary,
+          tone: activity.tone === "approval" ? "info" : activity.tone,
+        };
+        if (payload && typeof payload.detail === "string" && payload.detail.length > 0) {
+          entry.detail = payload.detail;
+        }
+        if (command) {
+          entry.command = command;
+        }
+        if (changedFiles.length > 0) {
+          entry.changedFiles = changedFiles.map(shortenAbsolutePath);
+        }
+        return entry;
+      })
+  );
 }
 
 export function deriveSubagentGroups(
@@ -501,9 +507,7 @@ export function deriveSubagentGroups(
       taskId,
       parentToolUseId: task.started?.parentToolUseId,
       description:
-        (startPayload?.detail as string) ??
-        (startPayload?.taskType as string) ??
-        "Subagent",
+        (startPayload?.detail as string) ?? (startPayload?.taskType as string) ?? "Subagent",
       taskType: startPayload?.taskType as string | undefined,
       status: task.completed
         ? ((completedPayload?.status as SubagentGroup["status"]) ?? "completed")
@@ -558,7 +562,7 @@ function asTrimmedString(value: unknown): string | null {
  * Finds common root markers (/src/, /apps/, etc.) and strips the prefix.
  * Falls back to the last 3 path segments for unrecognized layouts.
  */
-function shortenAbsolutePath(filePath: string): string {
+export function shortenAbsolutePath(filePath: string): string {
   const markers = [
     "/src/",
     "/lib/",
@@ -619,12 +623,7 @@ function pushChangedFile(target: string[], seen: Set<string>, value: unknown) {
   target.push(normalized);
 }
 
-function collectChangedFiles(
-  value: unknown,
-  target: string[],
-  seen: Set<string>,
-  depth: number,
-) {
+function collectChangedFiles(value: unknown, target: string[], seen: Set<string>, depth: number) {
   if (depth > 4 || target.length >= 12) {
     return;
   }
@@ -721,8 +720,7 @@ export function deriveCurrentActivityStatus(
         ? (activity.payload as Record<string, unknown>)
         : null;
     const detail = payload && typeof payload.detail === "string" ? payload.detail : undefined;
-    const itemType =
-      payload && typeof payload.itemType === "string" ? payload.itemType : undefined;
+    const itemType = payload && typeof payload.itemType === "string" ? payload.itemType : undefined;
 
     switch (activity.kind) {
       case "tool.started":
@@ -772,8 +770,7 @@ export function deriveRecentActivityStatuses(
         ? (activity.payload as Record<string, unknown>)
         : null;
     const detail = payload && typeof payload.detail === "string" ? payload.detail : undefined;
-    const itemType =
-      payload && typeof payload.itemType === "string" ? payload.itemType : undefined;
+    const itemType = payload && typeof payload.itemType === "string" ? payload.itemType : undefined;
 
     let label: string | null = null;
     switch (activity.kind) {
@@ -932,7 +929,6 @@ export function formatTimeRemaining(resetsAtMs: number): string {
   if (hours > 0) return minutes > 0 ? `${hours}h${minutes}m` : `${hours}h`;
   return `${minutes}m`;
 }
-
 
 export function derivePhase(session: ThreadSession | null): SessionPhase {
   if (!session || session.status === "closed") return "disconnected";

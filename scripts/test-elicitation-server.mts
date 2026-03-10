@@ -70,7 +70,12 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
   if (!clientSupportsElicitation) {
     log(`Client does not support elicitation, returning fallback for ${name}`);
     return {
-      content: [{ type: "text", text: `Cannot run ${name}: client does not support elicitation. Upgrade Claude Code or enable elicitation capability.` }],
+      content: [
+        {
+          type: "text",
+          text: `Cannot run ${name}: client does not support elicitation. Upgrade Claude Code or enable elicitation capability.`,
+        },
+      ],
       isError: true,
     };
   }
@@ -95,10 +100,14 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
 
     if (result.action === "accept" && result.content) {
       return {
-        content: [{ type: "text", text: `API configured!\n\n${JSON.stringify(result.content, null, 2)}` }],
+        content: [
+          { type: "text", text: `API configured!\n\n${JSON.stringify(result.content, null, 2)}` },
+        ],
       };
     }
-    return { content: [{ type: "text", text: `Elicitation ${result.action}. No config applied.` }] };
+    return {
+      content: [{ type: "text", text: `Elicitation ${result.action}. No config applied.` }],
+    };
   }
 
   if (name === "simple_question") {
@@ -108,7 +117,9 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
     })) as { action: string; content?: Record<string, unknown> };
 
     if (result.action === "accept" && result.content) {
-      return { content: [{ type: "text", text: `User responded: ${JSON.stringify(result.content)}` }] };
+      return {
+        content: [{ type: "text", text: `User responded: ${JSON.stringify(result.content)}` }],
+      };
     }
     return { content: [{ type: "text", text: `User ${result.action}d the question.` }] };
   }
@@ -116,7 +127,12 @@ async function handleToolCall(name: string, args: Record<string, unknown>): Prom
   return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
 }
 
-function handleMessage(msg: { id?: number | string; method?: string; result?: unknown; params?: Record<string, unknown> }) {
+function handleMessage(msg: {
+  id?: number | string;
+  method?: string;
+  result?: unknown;
+  params?: Record<string, unknown>;
+}) {
   // Response to our outgoing request
   if (msg.id !== undefined && !msg.method && pendingRequests.has(msg.id)) {
     const resolve = pendingRequests.get(msg.id)!;
@@ -170,13 +186,20 @@ process.stdin.on("data", (chunk: string) => {
     if (headerEnd === -1) break;
     const header = buffer.slice(0, headerEnd);
     const match = header.match(/Content-Length:\s*(\d+)/i);
-    if (!match) { buffer = buffer.slice(headerEnd + 4); continue; }
+    if (!match) {
+      buffer = buffer.slice(headerEnd + 4);
+      continue;
+    }
     const len = parseInt(match[1], 10);
     const bodyStart = headerEnd + 4;
     if (buffer.length < bodyStart + len) break;
     const body = buffer.slice(bodyStart, bodyStart + len);
     buffer = buffer.slice(bodyStart + len);
-    try { handleMessage(JSON.parse(body)); } catch (e) { log(`Parse/handle error: ${e}`); }
+    try {
+      handleMessage(JSON.parse(body));
+    } catch (e) {
+      log(`Parse/handle error: ${e}`);
+    }
   }
 });
 

@@ -68,10 +68,7 @@ export interface ProviderAdapterShape<TError> {
   /**
    * Interrupt an active turn.
    */
-  readonly interruptTurn: (
-    threadId: ThreadId,
-    turnId?: TurnId,
-  ) => Effect.Effect<void, TError>;
+  readonly interruptTurn: (threadId: ThreadId, turnId?: TurnId) => Effect.Effect<void, TError>;
 
   /**
    * Respond to an interactive approval request.
@@ -119,7 +116,9 @@ export interface ProviderAdapterShape<TError> {
   /**
    * Get MCP server status for a session.
    */
-  readonly mcpGetStatus?: (threadId: ThreadId) => Effect.Effect<ReadonlyArray<McpServerStatus>, TError>;
+  readonly mcpGetStatus?: (
+    threadId: ThreadId,
+  ) => Effect.Effect<ReadonlyArray<McpServerStatus>, TError>;
 
   /**
    * Set (replace) dynamic MCP servers for a session.
@@ -149,9 +148,7 @@ export interface ProviderAdapterShape<TError> {
   /**
    * Read a provider thread snapshot.
    */
-  readonly readThread: (
-    threadId: ThreadId,
-  ) => Effect.Effect<ProviderThreadSnapshot, TError>;
+  readonly readThread: (threadId: ThreadId) => Effect.Effect<ProviderThreadSnapshot, TError>;
 
   /**
    * Roll back a provider thread by N turns.

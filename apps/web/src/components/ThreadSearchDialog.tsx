@@ -222,10 +222,7 @@ export default function ThreadSearchDialog({
     [threads, projects, deferredQuery],
   );
 
-  const grouped = useMemo(
-    () => groupByProject(searchResults, projects),
-    [searchResults, projects],
-  );
+  const grouped = useMemo(() => groupByProject(searchResults, projects), [searchResults, projects]);
 
   // Flat list of thread IDs for keyboard navigation
   const flatThreadIds = useMemo(() => searchResults.map((r) => r.thread.id), [searchResults]);
@@ -313,14 +310,8 @@ export default function ThreadSearchDialog({
           <div className="mx-2.5 h-px bg-border/60" />
 
           {/* Results */}
-          <div
-            className="-mx-px relative min-h-0 rounded-t-xl border border-b-0 border-transparent bg-popover bg-clip-padding"
-          >
-            <div
-              ref={listRef}
-              role="listbox"
-              className="max-h-72 overflow-y-auto scroll-py-2 p-2"
-            >
+          <div className="-mx-px relative min-h-0 rounded-t-xl border border-b-0 border-transparent bg-popover bg-clip-padding">
+            <div ref={listRef} role="listbox" className="max-h-72 overflow-y-auto scroll-py-2 p-2">
               {searchResults.length === 0 && (
                 <p className="py-6 text-center text-sm text-muted-foreground/60">
                   {deferredQuery ? "No threads found" : "No threads yet"}

@@ -54,11 +54,7 @@ const CircularProgress = memo(function CircularProgress({
   const offset = circumference - (clamped / 100) * circumference;
 
   const strokeColor =
-    clamped >= 90
-      ? "stroke-red-500"
-      : clamped >= 70
-        ? "stroke-yellow-500"
-        : "stroke-green-500";
+    clamped >= 90 ? "stroke-red-500" : clamped >= 70 ? "stroke-yellow-500" : "stroke-green-500";
 
   return (
     <svg
@@ -100,11 +96,7 @@ const RATE_LIMIT_LABELS: Record<string, string> = {
   overage: "overage",
 };
 
-const RateLimitBadge = memo(function RateLimitBadge({
-  entry,
-}: {
-  entry: RateLimitEntry;
-}) {
+const RateLimitBadge = memo(function RateLimitBadge({ entry }: { entry: RateLimitEntry }) {
   const label = RATE_LIMIT_LABELS[entry.rateLimitType] ?? entry.rateLimitType;
   const pct = Math.round(entry.utilization * 100);
   const remaining = entry.resetsAt ? formatTimeRemaining(entry.resetsAt) : null;
@@ -124,7 +116,10 @@ const RateLimitBadge = memo(function RateLimitBadge({
     .join(" · ");
 
   return (
-    <span className={cn("inline-flex shrink-0 items-center gap-1 tabular-nums", colorClass)} title={title}>
+    <span
+      className={cn("inline-flex shrink-0 items-center gap-1 tabular-nums", colorClass)}
+      title={title}
+    >
       <CircularProgress percent={pct} size={14} strokeWidth={2} />
       {label}:{pct}%{remaining ? `(${remaining})` : ""}
     </span>
@@ -180,8 +175,7 @@ export const SessionHud = memo(function SessionHud({
   const elapsed = useElapsed(sessionStartedAt, isActive);
 
   const hasMetrics = metrics !== undefined;
-  const hasTokens =
-    hasMetrics && (metrics.totalInputTokens > 0 || metrics.totalOutputTokens > 0);
+  const hasTokens = hasMetrics && (metrics.totalInputTokens > 0 || metrics.totalOutputTokens > 0);
   const hasCost = hasMetrics && metrics.totalCostUsd > 0;
   const hasContext =
     hasMetrics &&
@@ -223,7 +217,9 @@ export const SessionHud = memo(function SessionHud({
         >
           <CircularProgress percent={metrics.contextUsagePercent} />
           ctx:{metrics.contextUsedTokens != null ? formatTokenCount(metrics.contextUsedTokens) : ""}
-          {metrics.contextWindowSize != null ? `/${formatTokenCount(metrics.contextWindowSize)}` : ""}
+          {metrics.contextWindowSize != null
+            ? `/${formatTokenCount(metrics.contextWindowSize)}`
+            : ""}
         </span>
       )}
 

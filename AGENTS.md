@@ -54,6 +54,7 @@ Three providers are defined in contracts: `"claudeCode"` | `"codex"` | `"cursor"
 Each provider implements `ProviderAdapterShape` (start/stop session, send turn, interrupt, approvals, events). Adapters are registered in `ProviderAdapterRegistry` and resolved by `ProviderService` at runtime.
 
 Key services (all Effect-based):
+
 - `ProviderService` — cross-provider facade used by WebSocket transport
 - `ProviderAdapterRegistry` — maps ProviderKind → adapter
 - `ProviderSessionDirectory` — persists session bindings to SQLite

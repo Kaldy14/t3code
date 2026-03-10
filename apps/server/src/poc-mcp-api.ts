@@ -67,7 +67,9 @@ async function main() {
           const statuses: McpServerStatus[] = await session.mcpServerStatus();
           logObj("mcpServerStatus() result", statuses);
           for (const s of statuses) {
-            log(`  ${s.name}: status=${s.status}, scope=${s.scope ?? "?"}, tools=${s.tools?.length ?? 0}`);
+            log(
+              `  ${s.name}: status=${s.status}, scope=${s.scope ?? "?"}, tools=${s.tools?.length ?? 0}`,
+            );
             if (s.tools) {
               for (const t of s.tools.slice(0, 3)) {
                 log(`    - ${t.name}: ${t.description?.slice(0, 60) ?? ""}`);

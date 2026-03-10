@@ -13,7 +13,7 @@ import type {
   ServerProviderStatus,
   ServerProviderStatusState,
 } from "@t3tools/contracts";
-import { Effect, Layer, Option, Result, Stream } from "effect";
+import { Array, Effect, Fiber, Layer, Option, Result, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 import {
@@ -310,45 +310,44 @@ export const checkCodexProviderStatus: Effect.Effect<
 
 // ── Claude Code health check ─────────────────────────────────────────
 
-export const checkClaudeCodeProviderStatus: Effect.Effect<
-  ServerProviderStatus,
-  never
-> = Effect.sync(() => {
-  const checkedAt = new Date().toISOString();
-  try {
-    // The adapter uses @anthropic-ai/claude-agent-sdk, not the CLI.
-    // Verify the SDK is resolvable at startup.
-    require.resolve("@anthropic-ai/claude-agent-sdk");
-    return {
-      provider: CLAUDE_CODE_PROVIDER,
-      status: "ready" as const,
-      available: true,
-      authStatus: "authenticated" as const,
-      checkedAt,
-    } satisfies ServerProviderStatus;
-  } catch {
-    return {
-      provider: CLAUDE_CODE_PROVIDER,
-      status: "error" as const,
-      available: false,
-      authStatus: "unknown" as const,
-      checkedAt,
-      message: "Claude Code SDK (@anthropic-ai/claude-agent-sdk) is not installed.",
-    } satisfies ServerProviderStatus;
-  }
-});
+export const checkClaudeCodeProviderStatus: Effect.Effect<ServerProviderStatus, never> =
+  Effect.sync(() => {
+    const checkedAt = new Date().toISOString();
+    try {
+      // The adapter uses @anthropic-ai/claude-agent-sdk, not the CLI.
+      // Verify the SDK is resolvable at startup.
+      require.resolve("@anthropic-ai/claude-agent-sdk");
+      return {
+        provider: CLAUDE_CODE_PROVIDER,
+        status: "ready" as const,
+        available: true,
+        authStatus: "authenticated" as const,
+        checkedAt,
+      } satisfies ServerProviderStatus;
+    } catch {
+      return {
+        provider: CLAUDE_CODE_PROVIDER,
+        status: "error" as const,
+        available: false,
+        authStatus: "unknown" as const,
+        checkedAt,
+        message: "Claude Code SDK (@anthropic-ai/claude-agent-sdk) is not installed.",
+      } satisfies ServerProviderStatus;
+    }
+  });
 
 // ── Layer ───────────────────────────────────────────────────────────
 
 export const ProviderHealthLive = Layer.effect(
   ProviderHealth,
   Effect.gen(function* () {
-    const [codexStatus, claudeStatus] = yield* Effect.all(
+    const healthCheckFiber = yield* Effect.all(
       [checkCodexProviderStatus, checkClaudeCodeProviderStatus],
       { concurrency: "unbounded" },
-    );
+    ).pipe(Effect.forkScoped);
+
     return {
-      getStatuses: Effect.succeed([codexStatus, claudeStatus]),
+      getStatuses: Fiber.join(healthCheckFiber),
     } satisfies ProviderHealthShape;
   }),
 );

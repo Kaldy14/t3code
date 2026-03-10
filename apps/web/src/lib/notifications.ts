@@ -52,7 +52,12 @@ export function dispatchActivityNotification(
   if (!shouldNotify()) return;
   const notification = buildActivityNotification(activity, threadTitle);
   if (!notification) return;
-  fireNotification(notification.title, notification.body, activity.turnId ?? activity.id, onNavigate);
+  fireNotification(
+    notification.title,
+    notification.body,
+    activity.turnId ?? activity.id,
+    onNavigate,
+  );
 }
 
 // ── Session-set notifications (turn finished) ────────────────────────
