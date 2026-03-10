@@ -69,6 +69,10 @@ export interface GitHubCliShape {
 
   /**
    * Create a pull request from branch context and body file.
+   *
+   * When `repo` is provided (e.g. `"owner/name"`), it is passed as `--repo`
+   * to `gh pr create`, ensuring the command succeeds in non-interactive
+   * environments where `gh` cannot prompt for repository selection.
    */
   readonly createPullRequest: (input: {
     readonly cwd: string;
@@ -76,6 +80,7 @@ export interface GitHubCliShape {
     readonly headBranch: string;
     readonly title: string;
     readonly bodyFile: string;
+    readonly repo?: string;
   }) => Effect.Effect<void, GitHubCliError>;
 
   /**

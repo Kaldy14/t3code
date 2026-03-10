@@ -1878,6 +1878,31 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                 } satisfies PermissionResult;
               }
 
+              // Plan-mode server-side enforcement: block mutating tools while
+              // allowing read-only exploration. The SDK's setPermissionMode("plan")
+              // should prevent mutations, but if it doesn't we must block them
+              // here to avoid executing the plan instead of just proposing it.
+              if (context.turnState?.isPlanMode) {
+                const lower = toolName.toLowerCase();
+                const isReadOnly =
+                  lower === "read" ||
+                  lower === "grep" ||
+                  lower === "glob" ||
+                  lower === "websearch" ||
+                  lower === "web_search" ||
+                  lower === "webfetch" ||
+                  lower === "web_fetch" ||
+                  lower === "toolsearch" ||
+                  lower === "view";
+                if (!isReadOnly) {
+                  return {
+                    behavior: "deny",
+                    message:
+                      "Tool execution is not allowed in plan mode. Read-only tools (Read, Grep, Glob) are permitted for exploration. Describe the plan without executing changes.",
+                  } satisfies PermissionResult;
+                }
+              }
+
               const runtimeMode = input.runtimeMode ?? "full-access";
               if (runtimeMode === "full-access") {
                 return {

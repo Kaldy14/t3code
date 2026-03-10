@@ -554,6 +554,20 @@ export const makeGitManager = Effect.gen(function* () {
       };
     });
 
+  const resolveRepoName = (cwd: string) =>
+    gitHubCli
+      .execute({
+        cwd,
+        args: ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
+      })
+      .pipe(
+        Effect.map((result) => {
+          const trimmed = result.stdout.trim();
+          return trimmed.length > 0 ? trimmed : null;
+        }),
+        Effect.catch(() => Effect.succeed(null)),
+      );
+
   const runPrStep = (cwd: string, fallbackBranch: string | null) =>
     Effect.gen(function* () {
       const details = yield* gitCore.statusDetails(cwd);
@@ -595,6 +609,8 @@ export const makeGitManager = Effect.gen(function* () {
         diffPatch: limitContext(rangeContext.diffPatch, 60_000),
       });
 
+      const repoName = yield* resolveRepoName(cwd);
+
       const bodyFile = path.join(tempDir, `t3code-pr-body-${process.pid}-${randomUUID()}.md`);
       yield* fileSystem
         .writeFileString(bodyFile, generated.body)
@@ -610,6 +626,7 @@ export const makeGitManager = Effect.gen(function* () {
           headBranch: branch,
           title: generated.title,
           bodyFile,
+          ...(repoName ? { repo: repoName } : {}),
         })
         .pipe(Effect.ensuring(fileSystem.remove(bodyFile).pipe(Effect.catch(() => Effect.void))));
 
