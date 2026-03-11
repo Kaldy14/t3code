@@ -19,6 +19,7 @@ import { GitCore } from "../../git/Services/GitCore.ts";
 import { ProviderAdapterRequestError } from "../../provider/Errors.ts";
 import { TextGeneration } from "../../git/Services/TextGeneration.ts";
 import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import { buildConversationSummary } from "../conversationSummary.ts";
 import { OrchestrationEngineService } from "../Services/OrchestrationEngine.ts";
 import {
   ProviderCommandReactor,
@@ -125,6 +126,11 @@ function buildGeneratedWorktreeBranchName(raw: string): string {
   const safeFragment = branchFragment.length > 0 ? branchFragment : "update";
   return `${WORKTREE_BRANCH_PREFIX}/${safeFragment}`;
 }
+
+type EnsureSessionResult =
+  | { readonly kind: "existing"; readonly session: string }
+  | { readonly kind: "resumed"; readonly session: string }
+  | { readonly kind: "fresh-start"; readonly session: string };
 
 const make = Effect.gen(function* () {
   const orchestrationEngine = yield* OrchestrationEngineService;
@@ -283,7 +289,7 @@ const make = Effect.gen(function* () {
 
       if (!runtimeModeChanged && !providerChanged && !shouldRestartForModelChange) {
         if (activeSession) {
-          return existingSessionThreadId;
+          return { kind: "existing", session: existingSessionThreadId };
         }
         // Adapter has no active session (e.g. process crashed or server
         // restarted). Fall through to start a fresh session instead of
@@ -293,7 +299,9 @@ const make = Effect.gen(function* () {
       const resumeCursor =
         providerChanged || shouldRestartForModelChange
           ? undefined
-          : (activeSession?.resumeCursor ?? undefined);
+          : (activeSession?.resumeCursor
+            ?? (yield* providerService.getPersistedResumeCursor(existingSessionThreadId))
+            ?? undefined);
       yield* Effect.logInfo("provider command reactor restarting provider session", {
         threadId,
         existingSessionThreadId,
@@ -319,14 +327,16 @@ const make = Effect.gen(function* () {
         runtimeMode: restartedSession.runtimeMode,
       });
       yield* bindSessionToThread(restartedSession);
-      return restartedSession.threadId;
+      return { kind: resumeCursor !== undefined ? "resumed" : "fresh-start", session: restartedSession.threadId! } as EnsureSessionResult;
     }
 
-    const startedSession = yield* startProviderSession(
-      options?.provider !== undefined ? { provider: options.provider } : undefined,
-    );
+    const persistedCursor = yield* providerService.getPersistedResumeCursor(threadId);
+    const startedSession = yield* startProviderSession({
+      ...(options?.provider !== undefined ? { provider: options.provider } : {}),
+      ...(persistedCursor !== undefined ? { resumeCursor: persistedCursor } : {}),
+    });
     yield* bindSessionToThread(startedSession);
-    return startedSession.threadId;
+    return { kind: persistedCursor !== undefined ? "resumed" : "fresh-start", session: startedSession.threadId! } as EnsureSessionResult;
   });
 
   const sendTurnForThread = Effect.fnUntraced(function* (input: {
@@ -347,12 +357,23 @@ const make = Effect.gen(function* () {
     if (input.providerOptions !== undefined) {
       threadProviderOptions.set(input.threadId, input.providerOptions);
     }
-    yield* ensureSessionForThread(input.threadId, input.createdAt, {
+    const sessionResult = yield* ensureSessionForThread(input.threadId, input.createdAt, {
       ...(input.provider !== undefined ? { provider: input.provider } : {}),
       ...(input.model !== undefined ? { model: input.model } : {}),
       ...(input.modelOptions !== undefined ? { modelOptions: input.modelOptions } : {}),
       ...(input.providerOptions !== undefined ? { providerOptions: input.providerOptions } : {}),
     });
+
+    // When a fresh start occurs (no resume cursor), inject conversation summary
+    let conversationContext: string | undefined;
+    if (sessionResult.kind === "fresh-start") {
+      const readModel = yield* orchestrationEngine.getReadModel();
+      const thread = readModel.threads.find((t) => t.id === input.threadId);
+      if (thread && thread.messages.length > 0) {
+        conversationContext = buildConversationSummary(thread.messages);
+      }
+    }
+
     const normalizedInput = toNonEmptyProviderInput(input.messageText);
     const normalizedAttachments = input.attachments ?? [];
     const activeSession = yield* providerService
@@ -373,6 +394,7 @@ const make = Effect.gen(function* () {
       ...(modelForTurn !== undefined ? { model: modelForTurn } : {}),
       ...(input.modelOptions !== undefined ? { modelOptions: input.modelOptions } : {}),
       ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
+      ...(conversationContext ? { conversationContext } : {}),
     });
   });
 

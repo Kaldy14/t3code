@@ -427,6 +427,38 @@ function runtimeEventToActivities(
       ];
     }
 
+    case "session.context-reset": {
+      const payload = event.payload as {
+        strategy: "resumed" | "summary-injected" | "fresh-start";
+        reason: string;
+        priorTurnCount?: number;
+      };
+      if (payload.strategy === "resumed") {
+        return []; // No activity for successful resume
+      }
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: "info",
+          kind: "session.context-reset",
+          summary:
+            payload.strategy === "summary-injected"
+              ? "Session interrupted — conversation summary was provided to Claude"
+              : "Session interrupted — conversation context may have been lost",
+          payload: {
+            strategy: payload.strategy,
+            reason: payload.reason,
+            ...(payload.priorTurnCount !== undefined
+              ? { priorTurnCount: payload.priorTurnCount }
+              : {}),
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ];
+    }
+
     case "task.started": {
       return [
         {

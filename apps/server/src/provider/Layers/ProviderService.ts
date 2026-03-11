@@ -10,6 +10,7 @@
  * @module ProviderServiceLive
  */
 import {
+  EventId,
   NonNegativeInt,
   ThreadId,
   ProviderInterruptTurnInput,
@@ -241,6 +242,15 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
                     "Session resume failed with persisted cursor; retrying fresh start",
                     { threadId: input.binding.threadId, error },
                   );
+                  // Clear stale cursor before fresh start
+                  // MUST use null, not undefined -- undefined means "keep existing" in directory.upsert()
+                  yield* directory.upsert({
+                    threadId: input.binding.threadId,
+                    provider: input.binding.provider,
+                    runtimeMode: input.binding.runtimeMode ?? "full-access",
+                    resumeCursor: null,
+                    runtimePayload: input.binding.runtimePayload,
+                  });
                   return yield* adapter.startSession(baseStartInput);
                 }),
               ),
@@ -254,11 +264,43 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         }
 
         yield* upsertSessionBinding(resumed, input.binding.threadId);
+
+        // Determine recovery strategy for the context-reset event
+        const recoveryStrategy = hasResumeCursor
+          ? (resumed.resumeCursor !== undefined ? "resumed" : "fresh-start")
+          : "fresh-start";
+
         yield* analytics.record("provider.session.recovered", {
           provider: resumed.provider,
           strategy: "resume-thread",
           hasResumeCursor: resumed.resumeCursor !== undefined,
         });
+
+        // Emit session.context-reset event
+        const eventId = EventId.makeUnsafe(crypto.randomUUID());
+        const createdAt = new Date().toISOString();
+        const priorTurnCount =
+          input.binding.resumeCursor &&
+          typeof input.binding.resumeCursor === "object" &&
+          input.binding.resumeCursor !== null &&
+          "turnCount" in input.binding.resumeCursor &&
+          typeof (input.binding.resumeCursor as Record<string, unknown>).turnCount === "number"
+            ? ((input.binding.resumeCursor as Record<string, unknown>).turnCount as number)
+            : undefined;
+        yield* publishRuntimeEvent({
+          type: "session.context-reset",
+          eventId,
+          provider: resumed.provider,
+          threadId: input.binding.threadId,
+          createdAt,
+          payload: {
+            reason: "Session recovered after process death",
+            strategy: recoveryStrategy,
+            ...(priorTurnCount !== undefined ? { priorTurnCount } : {}),
+          },
+          providerRefs: {},
+        });
+
         return { adapter, session: resumed } as const;
       });
 
@@ -498,6 +540,16 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
     const getCapabilities: ProviderServiceShape["getCapabilities"] = (provider) =>
       registry.getByProvider(provider).pipe(Effect.map((adapter) => adapter.capabilities));
 
+    const getPersistedResumeCursor = (threadId: ThreadId) =>
+      Effect.gen(function* () {
+        const bindingOption = yield* directory.getBinding(threadId);
+        const binding = Option.getOrUndefined(bindingOption);
+        if (!binding) return undefined;
+        return binding.resumeCursor ?? undefined;
+      }).pipe(
+        Effect.orElseSucceed(() => undefined),
+      );
+
     const getSlashCommands: ProviderServiceShape["getSlashCommands"] = (threadId) =>
       Effect.gen(function* () {
         const routed = yield* resolveRoutableSession({
@@ -648,6 +700,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       stopSession,
       listSessions,
       getCapabilities,
+      getPersistedResumeCursor,
       getSlashCommands,
       getCachedSlashCommands,
       rollbackConversation,

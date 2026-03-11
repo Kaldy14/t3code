@@ -195,6 +195,7 @@ describe("ProviderCommandReactor", () => {
         Effect.succeed({
           sessionModelSwitch: provider === "cursor" ? "unsupported" : "in-session",
         }),
+      getPersistedResumeCursor: () => Effect.succeed(undefined),
       rollbackConversation: () => unsupported(),
       stopAll: () => Effect.succeed(undefined as unknown as void),
       streamEvents: Stream.fromPubSub(runtimeEventPubSub),

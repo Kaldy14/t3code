@@ -1,7 +1,7 @@
 import path from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { Effect, FileSystem, Layer } from "effect";
+import { Cause, Effect, FileSystem, Layer } from "effect";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQuery";
@@ -23,6 +23,7 @@ import { makeCodexAdapterLive } from "./provider/Layers/CodexAdapter";
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry";
 import { makeProviderServiceLive } from "./provider/Layers/ProviderService";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory";
+import { ProviderSessionDirectory } from "./provider/Services/ProviderSessionDirectory";
 import { ProviderService } from "./provider/Services/ProviderService";
 import { makeEventNdjsonLogger } from "./provider/Layers/EventNdjsonLogger";
 
@@ -58,9 +59,27 @@ export function makeServerProviderLayer(): Layer.Layer<
     const codexAdapterLayer = makeCodexAdapterLive(
       nativeEventLogger ? { nativeEventLogger } : undefined,
     );
-    const claudeAdapterLayer = makeClaudeCodeAdapterLive(
-      nativeEventLogger ? { nativeEventLogger } : undefined,
+    const sql = yield* SqlClient.SqlClient;
+    const fullyProvidedSessionDirectoryLayer = providerSessionDirectoryLayer.pipe(
+      Layer.provide(Layer.succeed(SqlClient.SqlClient, sql)),
     );
+    const claudeAdapterLayer = makeClaudeCodeAdapterLive({
+      ...(nativeEventLogger ? { nativeEventLogger } : {}),
+      persistResumeCursor: (threadId, cursor) =>
+        Effect.gen(function* () {
+          const dir = yield* ProviderSessionDirectory;
+          yield* dir.upsert({
+            threadId,
+            provider: "claudeCode",
+            resumeCursor: cursor,
+          });
+        }).pipe(
+          Effect.provide(fullyProvidedSessionDirectoryLayer),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("Cursor persist failed", { cause: Cause.pretty(cause) }),
+          ),
+        ),
+    });
     const adapterRegistryLayer = ProviderAdapterRegistryLive.pipe(
       Layer.provide(codexAdapterLayer),
       Layer.provide(claudeAdapterLayer),

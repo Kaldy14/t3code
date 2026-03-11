@@ -90,6 +90,7 @@ function createProviderServiceHarness(
     stopSession: () => unsupported(),
     listSessions,
     getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
+    getPersistedResumeCursor: () => Effect.succeed(undefined),
     rollbackConversation,
     stopAll: () => Effect.succeed(undefined as unknown as void),
     streamEvents: Stream.fromPubSub(runtimeEventPubSub),

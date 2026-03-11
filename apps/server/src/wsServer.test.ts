@@ -1171,6 +1171,7 @@ describe("WebSocket Server", () => {
       stopSession: () => unsupported(),
       listSessions: () => Effect.succeed([]),
       getCapabilities: () => Effect.succeed({ sessionModelSwitch: "in-session" }),
+      getPersistedResumeCursor: () => Effect.succeed(undefined),
       rollbackConversation: () => unsupported(),
       stopAll: () => Effect.void,
       streamEvents: Stream.fromPubSub(runtimeEventPubSub),

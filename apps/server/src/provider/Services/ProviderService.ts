@@ -102,6 +102,14 @@ export interface ProviderServiceShape {
   }) => Effect.Effect<void, ProviderServiceError>;
 
   /**
+   * Get the persisted resume cursor for a thread from SQLite.
+   * Returns undefined when no binding or cursor exists.
+   */
+  readonly getPersistedResumeCursor: (
+    threadId: ThreadId,
+  ) => Effect.Effect<unknown | undefined>;
+
+  /**
    * Get the available slash commands for a session.
    */
   readonly getSlashCommands?: (

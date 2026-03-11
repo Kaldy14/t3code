@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import {
   EventId,
   IsoDateTime,
+  NonNegativeInt,
   ProviderItemId,
   RuntimeItemId,
   RuntimeRequestId,
@@ -137,6 +138,7 @@ const ProviderRuntimeEventType = Schema.Literals([
   "session.configured",
   "session.state.changed",
   "session.exited",
+  "session.context-reset",
   "thread.started",
   "thread.state.changed",
   "thread.metadata.updated",
@@ -187,6 +189,7 @@ const SessionStartedType = Schema.Literal("session.started");
 const SessionConfiguredType = Schema.Literal("session.configured");
 const SessionStateChangedType = Schema.Literal("session.state.changed");
 const SessionExitedType = Schema.Literal("session.exited");
+const SessionContextResetType = Schema.Literal("session.context-reset");
 const ThreadStartedType = Schema.Literal("thread.started");
 const ThreadStateChangedType = Schema.Literal("thread.state.changed");
 const ThreadMetadataUpdatedType = Schema.Literal("thread.metadata.updated");
@@ -268,6 +271,13 @@ const SessionExitedPayload = Schema.Struct({
   exitKind: Schema.optional(RuntimeSessionExitKind),
 });
 export type SessionExitedPayload = typeof SessionExitedPayload.Type;
+
+const SessionContextResetPayload = Schema.Struct({
+  reason: TrimmedNonEmptyStringSchema,
+  strategy: Schema.Literals(["resumed", "summary-injected", "fresh-start"]),
+  priorTurnCount: Schema.optional(NonNegativeInt),
+});
+export type SessionContextResetPayload = typeof SessionContextResetPayload.Type;
 
 const ThreadStartedPayload = Schema.Struct({
   providerThreadId: Schema.optional(TrimmedNonEmptyStringSchema),
@@ -602,6 +612,14 @@ const ProviderRuntimeSessionExitedEvent = Schema.Struct({
 });
 export type ProviderRuntimeSessionExitedEvent = typeof ProviderRuntimeSessionExitedEvent.Type;
 
+const ProviderRuntimeSessionContextResetEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: SessionContextResetType,
+  payload: SessionContextResetPayload,
+});
+export type ProviderRuntimeSessionContextResetEvent =
+  typeof ProviderRuntimeSessionContextResetEvent.Type;
+
 const ProviderRuntimeThreadStartedEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
   type: ThreadStartedType,
@@ -923,6 +941,7 @@ export const ProviderRuntimeEventV2 = Schema.Union([
   ProviderRuntimeSessionConfiguredEvent,
   ProviderRuntimeSessionStateChangedEvent,
   ProviderRuntimeSessionExitedEvent,
+  ProviderRuntimeSessionContextResetEvent,
   ProviderRuntimeThreadStartedEvent,
   ProviderRuntimeThreadStateChangedEvent,
   ProviderRuntimeThreadMetadataUpdatedEvent,

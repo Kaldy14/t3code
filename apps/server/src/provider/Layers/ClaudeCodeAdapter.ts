@@ -54,6 +54,7 @@ import { ClaudeCodeAdapter, type ClaudeCodeAdapterShape } from "../Services/Clau
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = "claudeCode" as const;
+const CURSOR_DEBOUNCE_MS = 500;
 
 type PromptQueueItem =
   | {
@@ -148,6 +149,8 @@ interface ClaudeSessionContext {
   lastAssistantUuid: string | undefined;
   lastThreadStartedId: string | undefined;
   stopped: boolean;
+  lastPersistedCursorAt: number;
+  pendingCursorWrite: unknown | undefined;
   availableSlashCommands: string[];
 }
 
@@ -171,6 +174,10 @@ export interface ClaudeCodeAdapterLiveOptions {
   }) => ClaudeQueryRuntime;
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
+  readonly persistResumeCursor?: (
+    threadId: ThreadId,
+    cursor: unknown,
+  ) => Effect.Effect<void>;
 }
 
 function isUuid(value: string): boolean {
@@ -433,6 +440,10 @@ function titleForTool(itemType: CanonicalItemType, toolName: string): string {
 function buildUserMessage(input: ProviderSendTurnInput): SDKUserMessage {
   const fragments: string[] = [];
 
+  if (input.conversationContext && input.conversationContext.trim().length > 0) {
+    fragments.push(input.conversationContext.trim());
+  }
+
   if (input.input && input.input.trim().length > 0) {
     fragments.push(input.input.trim());
   }
@@ -678,6 +689,8 @@ function resolveClaudeBinaryPath(): string | undefined {
 
 function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
   return Effect.gen(function* () {
+    const persistResumeCursorCallback = options?.persistResumeCursor;
+
     const nativeEventLogger =
       options?.nativeEventLogger ??
       (options?.nativeEventLogPath !== undefined
@@ -789,6 +802,34 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           resumeCursor,
           updatedAt: yield* nowIso,
         };
+
+        // Eagerly persist with per-session debouncing
+        if (persistResumeCursorCallback) {
+          const now = Date.now();
+          context.pendingCursorWrite = resumeCursor;
+          if (now - context.lastPersistedCursorAt > CURSOR_DEBOUNCE_MS) {
+            context.lastPersistedCursorAt = now;
+            context.pendingCursorWrite = undefined;
+            yield* persistResumeCursorCallback(threadId, resumeCursor).pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Failed to persist resume cursor", {
+                  threadId,
+                  cause: Cause.pretty(cause),
+                }),
+              ),
+            );
+          }
+        }
+      });
+
+    const flushPendingCursor = (context: ClaudeSessionContext): Effect.Effect<void> =>
+      Effect.gen(function* () {
+        if (persistResumeCursorCallback && context.pendingCursorWrite && context.session.threadId) {
+          const cursor = context.pendingCursorWrite;
+          context.pendingCursorWrite = undefined;
+          context.lastPersistedCursorAt = Date.now();
+          yield* persistResumeCursorCallback(context.session.threadId, cursor);
+        }
       });
 
     const ensureThreadId = (
@@ -896,6 +937,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
       result?: SDKResultMessage,
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
+        yield* flushPendingCursor(context);
         const turnState = context.turnState;
         if (!turnState) {
           const stamp = yield* makeEventStamp();
@@ -1736,6 +1778,23 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           });
         }
 
+        // Persist final resume cursor before session deletion
+        yield* flushPendingCursor(context);
+        if (persistResumeCursorCallback && context.pendingCursorWrite === undefined
+            && context.session.threadId && context.session.resumeCursor) {
+          yield* persistResumeCursorCallback(
+            context.session.threadId,
+            context.session.resumeCursor,
+          ).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Failed to persist final resume cursor on session stop", {
+                threadId: context.internalThreadId,
+                cause: Cause.pretty(cause),
+              }),
+            ),
+          );
+        }
+
         sessions.delete(context.internalThreadId);
       });
 
@@ -2191,6 +2250,8 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           lastAssistantUuid: resumeState?.resumeSessionAt,
           lastThreadStartedId: undefined,
           stopped: false,
+          lastPersistedCursorAt: 0,
+          pendingCursorWrite: undefined,
           availableSlashCommands: [],
         };
         yield* Ref.set(contextRef, context);
