@@ -134,7 +134,6 @@ import {
   type TurnDiffTreeNode,
 } from "../lib/turnDiffTree";
 
-import BranchToolbar from "./BranchToolbar";
 import { BranchToolbarBranchSelector } from "./BranchToolbarBranchSelector";
 import GitActionsControl from "./GitActionsControl";
 import { useBranchToolbar } from "./useBranchToolbar";
@@ -4723,6 +4722,132 @@ export default function ChatView({ threadId }: ChatViewProps) {
                               </Button>
                             </>
                           ) : null}
+
+                          {/* Env mode toggle (Local / New worktree) */}
+                          {isGitRepo && (
+                            <>
+                              <Separator
+                                orientation="vertical"
+                                className="mx-0.5 hidden h-4 sm:block"
+                              />
+                              {envLocked || activeWorktreePath ? (
+                                <span className="shrink-0 whitespace-nowrap px-2 text-sm text-muted-foreground/70 sm:px-3 sm:text-xs">
+                                  {activeWorktreePath ? "Worktree" : "Local"}
+                                </span>
+                              ) : envMode === "worktree" ? (
+                                <>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+                                    size="sm"
+                                    onClick={() => {
+                                      if (!draftThread?.worktreeBranchName) {
+                                        setWorktreeBranchName(
+                                          threadId,
+                                          WORKTREE_BRANCH_DEFAULT_TEMPLATE,
+                                        );
+                                      }
+                                      setIsWorktreeDialogOpen(true);
+                                    }}
+                                  >
+                                    {draftThread?.worktreeBranchName?.trim() &&
+                                    draftThread.worktreeBranchName.trim() !==
+                                      WORKTREE_BRANCH_DEFAULT_TEMPLATE
+                                      ? draftThread.worktreeBranchName.trim()
+                                      : "New worktree"}
+                                    <ChevronDownIcon className="ml-1 size-3 opacity-60" />
+                                  </Button>
+                                  <Dialog
+                                    open={isWorktreeDialogOpen}
+                                    onOpenChange={setIsWorktreeDialogOpen}
+                                  >
+                                    <DialogPopup className="max-w-sm">
+                                      <DialogHeader>
+                                        <DialogTitle>Worktree branch name</DialogTitle>
+                                        <DialogDescription>
+                                          Set a custom branch name, or leave blank to auto-generate.
+                                        </DialogDescription>
+                                      </DialogHeader>
+                                      <DialogPanel className="space-y-3">
+                                        <label className="grid gap-1.5">
+                                          <span className="text-xs font-medium text-foreground">
+                                            Branch name
+                                          </span>
+                                          <Input
+                                            value={draftThread?.worktreeBranchName ?? ""}
+                                            onChange={(event) =>
+                                              setWorktreeBranchName(threadId, event.target.value)
+                                            }
+                                            placeholder="Auto-generated (feature/…) if left blank"
+                                            spellCheck={false}
+                                            autoFocus
+                                          />
+                                        </label>
+                                      </DialogPanel>
+                                      <DialogFooter>
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          onClick={() => {
+                                            onEnvModeChange("local");
+                                            setWorktreeBranchName(threadId, null);
+                                            setIsWorktreeDialogOpen(false);
+                                          }}
+                                        >
+                                          Switch to local
+                                        </Button>
+                                        <Button
+                                          size="sm"
+                                          onClick={() => {
+                                            setIsWorktreeDialogOpen(false);
+                                            scheduleComposerFocus();
+                                          }}
+                                        >
+                                          Done
+                                        </Button>
+                                      </DialogFooter>
+                                    </DialogPopup>
+                                  </Dialog>
+                                </>
+                              ) : (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  className="shrink-0 whitespace-nowrap px-2 text-muted-foreground/70 hover:text-foreground/80 sm:px-3"
+                                  size="sm"
+                                  onClick={() => onEnvModeChange("worktree")}
+                                >
+                                  Local
+                                </Button>
+                              )}
+                              {/* Branch selector */}
+                              {branchToolbar.isReady && branchToolbar.activeProjectCwd && (
+                                <>
+                                  <Separator
+                                    orientation="vertical"
+                                    className="mx-0.5 hidden h-4 sm:block"
+                                  />
+                                  <BranchToolbarBranchSelector
+                                    activeProjectCwd={branchToolbar.activeProjectCwd}
+                                    activeThreadBranch={branchToolbar.activeThreadBranch}
+                                    activeWorktreePath={branchToolbar.activeWorktreePath}
+                                    branchCwd={branchToolbar.branchCwd}
+                                    effectiveEnvMode={branchToolbar.effectiveEnvMode}
+                                    envLocked={envLocked}
+                                    onSetThreadBranch={branchToolbar.setThreadBranch}
+                                    onComposerFocusRequest={scheduleComposerFocus}
+                                    {...(canCheckoutPullRequestIntoThread
+                                      ? {
+                                          onCheckoutPullRequestRequest:
+                                            openPullRequestDialog,
+                                        }
+                                      : {})}
+                                  />
+                                </>
+                              )}
+                            </>
+                          )}
                         </>
                       )}
                     </div>
@@ -4927,17 +5052,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             </form>
           </div>
 
-          {isGitRepo && (
-            <BranchToolbar
-              threadId={activeThread.id}
-              onEnvModeChange={onEnvModeChange}
-              envLocked={envLocked}
-              onComposerFocusRequest={scheduleComposerFocus}
-              {...(canCheckoutPullRequestIntoThread
-                ? { onCheckoutPullRequestRequest: openPullRequestDialog }
-                : {})}
-            />
-          )}
+          {/* Branch toolbar inlined into composer footer above */}
           {pullRequestDialogState ? (
             <PullRequestThreadDialog
               key={pullRequestDialogState.key}
