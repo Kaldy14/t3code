@@ -556,14 +556,16 @@ describe("ClaudeCodeAdapterLive", () => {
         provider: "claudeCode",
         runtimeMode: "full-access",
       });
+      // ProviderSession.threadId is undefined before the SDK assigns a real session_id
       assert.equal(session.threadId, undefined);
 
       const turn = yield* adapter.sendTurn({
-        threadId: session.threadId!,
+        threadId: THREAD_ID,
         input: "hello",
         attachments: [],
       });
-      assert.equal(turn.threadId, undefined);
+      // sendTurn returns the internal (orchestration-side) thread ID, not the provider-side one
+      assert.equal(turn.threadId, THREAD_ID);
 
       harness.query.emit({
         type: "stream_event",
@@ -602,13 +604,15 @@ describe("ClaudeCodeAdapterLive", () => {
       const sessionStarted = runtimeEvents[0];
       assert.equal(sessionStarted?.type, "session.started");
       if (sessionStarted?.type === "session.started") {
-        assert.equal("threadId" in sessionStarted, false);
+        // threadId is always the internal orchestration-side ID
+        assert.equal(sessionStarted.threadId, THREAD_ID);
       }
 
       const threadStarted = runtimeEvents[4];
       assert.equal(threadStarted?.type, "thread.started");
       if (threadStarted?.type === "thread.started") {
-        assert.equal(threadStarted.threadId, "sdk-thread-real");
+        // thread.started uses the internal thread ID; the SDK session_id is in the payload
+        assert.equal(threadStarted.threadId, THREAD_ID);
       }
     }).pipe(
       Effect.provideService(Random.Random, makeDeterministicRandomService()),
@@ -924,8 +928,9 @@ describe("ClaudeCodeAdapterLive", () => {
         nativeEvents.some((record) => record.event?.provider === "claudeCode"),
         true,
       );
+      // Native logger receives internalThreadId, not session.threadId (which is undefined for new sessions)
       assert.equal(
-        nativeEvents.some((record) => String(record.event?.threadId) === String(session.threadId)),
+        nativeEvents.some((record) => String(record.event?.threadId) === String(THREAD_ID)),
         true,
       );
       assert.equal(

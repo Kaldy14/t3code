@@ -9,7 +9,6 @@
 import * as childProcess from "node:child_process";
 import {
   type CanUseTool,
-  type ElicitationRequest,
   type ElicitationResult,
   type OnElicitation,
   query,
@@ -40,7 +39,7 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { Cause, DateTime, Deferred, Effect, Layer, PubSub, Queue, Random, Ref, Stream } from "effect";
+import { Cause, DateTime, Deferred, Effect, Fiber, Layer, PubSub, Queue, Random, Ref, Stream } from "effect";
 
 import {
   ProviderAdapterProcessError,
@@ -154,6 +153,8 @@ interface ClaudeSessionContext {
   lastPersistedCursorAt: number;
   pendingCursorWrite: unknown | undefined;
   availableSlashCommands: string[];
+  /** Handle to the SDK stream processing fiber so it can be interrupted on stop. */
+  streamFiber: Fiber.Fiber<void> | undefined;
 }
 
 interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
@@ -711,7 +712,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
     const sessions = new Map<ThreadId, ClaudeSessionContext>();
     /** Provider-level cache of slash commands from the most recent session init. */
     let cachedSlashCommands: string[] = [];
-    const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const runtimeEventQueue = yield* Queue.sliding<ProviderRuntimeEvent>(10_000);
     const approvalEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
 
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -886,9 +887,6 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
       cause?: unknown,
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
-        if (cause !== undefined) {
-          void cause;
-        }
         const turnState = context.turnState;
         const stamp = yield* makeEventStamp();
         yield* offerRuntimeEvent({
@@ -1017,6 +1015,12 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           id: turnState.turnId,
           items: [...turnState.items],
         });
+        // Cap in-memory turn history to prevent unbounded growth in long sessions.
+        // Only metadata (id) is needed for rollback; older turns are discarded.
+        const MAX_RETAINED_TURNS = 200;
+        if (context.turns.length > MAX_RETAINED_TURNS) {
+          context.turns.splice(0, context.turns.length - MAX_RETAINED_TURNS);
+        }
 
         // When the turn was started in plan mode and completed successfully,
         // emit a proposed-plan event so the ingestion pipeline creates a
@@ -1780,6 +1784,12 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
 
         context.query.close();
 
+        // Interrupt the SDK stream fiber so it doesn't linger after session cleanup.
+        if (context.streamFiber) {
+          yield* Fiber.interrupt(context.streamFiber).pipe(Effect.ignore);
+          context.streamFiber = undefined;
+        }
+
         const updatedAt = yield* nowIso;
         context.session = {
           ...context.session,
@@ -1960,6 +1970,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                 callbackOptions.signal.addEventListener("abort", onAbort, { once: true });
 
                 const answers = yield* Deferred.await(decisionDeferred);
+                callbackOptions.signal.removeEventListener("abort", onAbort);
                 context.pendingUserQuestions.delete(requestId);
 
                 return {
@@ -2070,6 +2081,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
               });
 
               const decision = yield* Deferred.await(decisionDeferred);
+              callbackOptions.signal.removeEventListener("abort", onAbort);
               pendingApprovals.delete(requestId);
 
               const resolvedStamp = yield* makeEventStamp();
@@ -2122,7 +2134,14 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                     ? "User cancelled tool execution."
                     : "User declined tool execution.",
               } satisfies PermissionResult;
-            }),
+            }).pipe(
+              Effect.catchCause(() =>
+                Effect.succeed({
+                  behavior: "deny",
+                  message: "Internal error processing tool permission request.",
+                } satisfies PermissionResult),
+              ),
+            ),
           );
 
         const handleElicitation: OnElicitation = (request, callbackOptions) =>
@@ -2192,9 +2211,14 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
               callbackOptions.signal.addEventListener("abort", onAbort, { once: true });
 
               const result = yield* Deferred.await(decisionDeferred);
+              callbackOptions.signal.removeEventListener("abort", onAbort);
               context.pendingElicitations.delete(requestId);
               return result;
-            }),
+            }).pipe(
+              Effect.catchCause(() =>
+                Effect.succeed({ action: "decline" } satisfies ElicitationResult),
+              ),
+            ),
           );
 
         const providerOptions = input.providerOptions?.claudeCode;
@@ -2286,6 +2310,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           lastPersistedCursorAt: 0,
           pendingCursorWrite: undefined,
           availableSlashCommands: [],
+          streamFiber: undefined,
         };
         yield* Ref.set(contextRef, context);
         sessions.set(threadId, context);
@@ -2334,7 +2359,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           providerRefs: {},
         });
 
-        Effect.runFork(runSdkStream(context));
+        context.streamFiber = Effect.runFork(runSdkStream(context));
 
         return {
           ...session,
@@ -2366,6 +2391,15 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           yield* Effect.tryPromise({
             try: () => context.query.setPermissionMode(targetMode),
             catch: (cause) => toRequestError(input.threadId, "turn/setPermissionMode", cause),
+          });
+        }
+
+        // Re-verify the session is still alive after the async model/permission
+        // calls above — stopSessionInternal could have run concurrently.
+        if (context.stopped) {
+          return yield* new ProviderAdapterSessionClosedError({
+            provider: PROVIDER,
+            threadId: input.threadId,
           });
         }
 
@@ -2601,7 +2635,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
       Effect.gen(function* () {
         const context = yield* requireSession(threadId);
         const result = yield* Effect.tryPromise({
-          try: () => context.query.setMcpServers(servers as any),
+          try: () => context.query.setMcpServers(servers),
           catch: (cause) =>
             new ProviderAdapterRequestError({
               provider: PROVIDER,
