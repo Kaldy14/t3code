@@ -282,7 +282,12 @@ const make = Effect.gen(function* () {
       const shouldRestartForModelChange = modelChanged && sessionModelSwitch === "restart-session";
 
       if (!runtimeModeChanged && !providerChanged && !shouldRestartForModelChange) {
-        return existingSessionThreadId;
+        if (activeSession) {
+          return existingSessionThreadId;
+        }
+        // Adapter has no active session (e.g. process crashed or server
+        // restarted). Fall through to start a fresh session instead of
+        // returning a reference to a dead process.
       }
 
       const resumeCursor =

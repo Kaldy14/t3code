@@ -217,14 +217,35 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         const persistedCwd = readPersistedCwd(input.binding.runtimePayload);
         const persistedProviderOptions = readPersistedProviderOptions(input.binding.runtimePayload);
 
-        const resumed = yield* adapter.startSession({
+        const baseStartInput = {
           threadId: input.binding.threadId,
           provider: input.binding.provider,
           ...(persistedCwd ? { cwd: persistedCwd } : {}),
           ...(persistedProviderOptions ? { providerOptions: persistedProviderOptions } : {}),
-          ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
           runtimeMode: input.binding.runtimeMode ?? "full-access",
+        };
+
+        const startEffect = adapter.startSession({
+          ...baseStartInput,
+          ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
         });
+
+        // When a resume cursor is present, the persisted state may be stale
+        // (e.g. server crashed before cleanup). If resuming fails, fall back
+        // to a fresh session so the thread remains usable.
+        const resumed = hasResumeCursor
+          ? yield* startEffect.pipe(
+              Effect.catch((error) =>
+                Effect.gen(function* () {
+                  yield* Effect.logWarning(
+                    "Session resume failed with persisted cursor; retrying fresh start",
+                    { threadId: input.binding.threadId, error },
+                  );
+                  return yield* adapter.startSession(baseStartInput);
+                }),
+              ),
+            )
+          : yield* startEffect;
         if (resumed.provider !== adapter.provider) {
           return yield* toValidationError(
             input.operation,

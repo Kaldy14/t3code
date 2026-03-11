@@ -1653,6 +1653,9 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
               const message = toMessage(Cause.squash(cause), "Claude runtime stream failed.");
               yield* emitRuntimeError(context, message, cause);
               yield* completeTurn(context, "failed", message);
+              // Clean up the dead session so subsequent interactions trigger a
+              // fresh session start instead of routing to a defunct process.
+              yield* stopSessionInternal(context, { exitKind: "error" });
             }),
           ),
         );
@@ -1660,7 +1663,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
 
     const stopSessionInternal = (
       context: ClaudeSessionContext,
-      options?: { readonly emitExitEvent?: boolean },
+      options?: { readonly emitExitEvent?: boolean; readonly exitKind?: "graceful" | "error" },
     ): Effect.Effect<void> =>
       Effect.gen(function* () {
         if (context.stopped) return;
@@ -1726,8 +1729,8 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
             createdAt: stamp.createdAt,
             threadId: context.internalThreadId,
             payload: {
-              reason: "Session stopped",
-              exitKind: "graceful",
+              reason: options?.exitKind === "error" ? "Process exited unexpectedly" : "Session stopped",
+              exitKind: options?.exitKind ?? "graceful",
             },
             providerRefs: {},
           });
