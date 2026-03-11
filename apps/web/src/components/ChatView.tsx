@@ -1115,6 +1115,16 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
   const activeProject = projects.find((p) => p.id === activeThread?.projectId);
 
+  // Reactively clear the draft thread once the server thread appears in the store.
+  // This avoids a race condition where clearing the draft synchronously (before the
+  // server snapshot has synced) leaves the route guard seeing neither draft nor
+  // server thread, causing an unwanted redirect to "/".
+  useEffect(() => {
+    if (isServerThread && draftThread) {
+      clearDraftThread(threadId);
+    }
+  }, [isServerThread, draftThread, clearDraftThread, threadId]);
+
   const openPullRequestDialog = useCallback(
     (reference?: string) => {
       if (!canCheckoutPullRequestIntoThread) {
@@ -3364,9 +3374,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
         createdAt: messageCreatedAt,
       });
       turnStartSucceeded = true;
-      if (isFirstMessage) {
-        clearDraftThread(threadIdForSend);
-      }
+      // Draft cleanup is handled reactively by the useEffect that watches
+      // for the server thread to appear in the store. Clearing the draft
+      // synchronously here would create a race condition: the route guard
+      // sees neither draft nor server thread and navigates away to "/".
     })().catch(async (err: unknown) => {
       if (createdServerThreadForLocalDraft && !turnStartSucceeded) {
         await api.orchestration
