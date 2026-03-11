@@ -443,6 +443,7 @@ interface ThreadTerminalDrawerProps {
   terminalGroups: ThreadTerminalGroup[];
   activeTerminalGroupId: string;
   focusRequestId: number;
+  hidden?: boolean;
   onSplitTerminal: () => void;
   onNewTerminal: () => void;
   splitShortcutLabel?: string | undefined;
@@ -492,6 +493,7 @@ export default function ThreadTerminalDrawer({
   terminalGroups,
   activeTerminalGroupId,
   focusRequestId,
+  hidden,
   onSplitTerminal,
   onNewTerminal,
   splitShortcutLabel,
@@ -503,6 +505,7 @@ export default function ThreadTerminalDrawer({
 }: ThreadTerminalDrawerProps) {
   const [drawerHeight, setDrawerHeight] = useState(() => clampDrawerHeight(height));
   const [resizeEpoch, setResizeEpoch] = useState(0);
+  const prevHiddenRef = useRef(hidden);
   const drawerHeightRef = useRef(drawerHeight);
   const lastSyncedHeightRef = useRef(clampDrawerHeight(height));
   const onHeightChangeRef = useRef(onHeightChange);
@@ -636,6 +639,13 @@ export default function ThreadTerminalDrawer({
   }, [hasReachedTerminalLimit, onNewTerminal]);
 
   useEffect(() => {
+    if (prevHiddenRef.current && !hidden) {
+      setResizeEpoch((v) => v + 1);
+    }
+    prevHiddenRef.current = hidden;
+  }, [hidden]);
+
+  useEffect(() => {
     onHeightChangeRef.current = onHeightChange;
   }, [onHeightChange]);
 
@@ -729,7 +739,7 @@ export default function ThreadTerminalDrawer({
   return (
     <aside
       className="thread-terminal-drawer relative flex min-w-0 shrink-0 flex-col overflow-hidden border-t border-border/80 bg-background"
-      style={{ height: `${drawerHeight}px` }}
+      style={{ height: `${drawerHeight}px`, ...(hidden ? { display: "none" } : {}) }}
     >
       <div
         className="group/resize absolute inset-x-0 -top-1 z-20 flex h-3 cursor-row-resize items-center justify-center"

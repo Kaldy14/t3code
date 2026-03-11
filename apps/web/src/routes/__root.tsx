@@ -146,6 +146,7 @@ function EventRouter() {
   const pathnameRef = useRef(pathname);
   const lastConfigIssuesSignatureRef = useRef<string | null>(null);
   const handledBootstrapThreadIdRef = useRef<string | null>(null);
+  const deferredThreadIdsRef = useRef(new Set<string>());
 
   pathnameRef.current = pathname;
 
@@ -216,15 +217,28 @@ function EventRouter() {
       },
     );
 
+    const getCurrentThreadId = (): string | null => {
+      const match = pathnameRef.current.match(/^\/([^/]+)/);
+      return match?.[1] ?? null;
+    };
+
     const unsubDomainEvent = api.orchestration.onDomainEvent((event) => {
       if (event.sequence <= latestSequence) {
         return;
       }
       latestSequence = event.sequence;
+
+      // Determine if this event is for the currently viewed thread.
+      const currentThreadId = getCurrentThreadId();
+      const isProjectEvent = event.aggregateKind === "project";
+      const isCurrentThread =
+        event.aggregateKind === "thread" && event.aggregateId === currentThreadId;
+
       if (event.type === "thread.turn-diff-completed" || event.type === "thread.reverted") {
         needsProviderInvalidation = true;
       }
-      domainEventFlushThrottler.maybeExecute();
+
+      // Always handle notifications regardless of which thread.
       if (event.type === "thread.activity-appended") {
         const threads = useStore.getState().threads;
         const thread = threads.find((t) => t.id === event.payload.threadId);
@@ -248,6 +262,15 @@ function EventRouter() {
             void navigate({ to: "/$threadId", params: { threadId } });
           },
         );
+      }
+
+      // Only trigger expensive full snapshot sync for the currently viewed thread
+      // or for project-level events that affect the sidebar/navigation.
+      if (isCurrentThread || isProjectEvent) {
+        domainEventFlushThrottler.maybeExecute();
+      } else if (event.aggregateKind === "thread") {
+        // For background threads, defer the sync until the user navigates there.
+        deferredThreadIdsRef.current.add(event.aggregateId);
       }
     });
     const unsubTerminalEvent = api.terminal.onEvent((event) => {
@@ -347,6 +370,21 @@ function EventRouter() {
     setProjectExpanded,
     syncServerReadModel,
   ]);
+
+  useEffect(() => {
+    // When the user switches threads, flush any deferred sync.
+    const match = pathname.match(/^\/([^/]+)/);
+    const threadId = match ? match[1] : null;
+    if (threadId && deferredThreadIdsRef.current.has(threadId)) {
+      deferredThreadIdsRef.current.delete(threadId);
+      const api = readNativeApi();
+      if (api) {
+        void api.orchestration.getSnapshot().then((snapshot) => {
+          syncServerReadModel(snapshot);
+        });
+      }
+    }
+  }, [pathname, syncServerReadModel]);
 
   return null;
 }

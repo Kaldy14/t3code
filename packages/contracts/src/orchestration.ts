@@ -28,6 +28,7 @@ export const ORCHESTRATION_WS_METHODS = {
 
 export const ORCHESTRATION_WS_CHANNELS = {
   domainEvent: "orchestration.domainEvent",
+  approvalFastPath: "orchestration.approvalFastPath",
 } as const;
 
 export const ProviderKind = Schema.Literals(["codex", "claudeCode", "cursor"]);

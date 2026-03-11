@@ -40,7 +40,7 @@ import {
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
-import { Cause, DateTime, Deferred, Effect, Layer, Queue, Random, Ref, Stream } from "effect";
+import { Cause, DateTime, Deferred, Effect, Layer, PubSub, Queue, Random, Ref, Stream } from "effect";
 
 import {
   ProviderAdapterProcessError,
@@ -710,6 +710,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
     /** Provider-level cache of slash commands from the most recent session init. */
     let cachedSlashCommands: string[] = [];
     const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const approvalEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
 
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
     const nextEventId = Effect.map(Random.nextUUIDv4, (id) => EventId.makeUnsafe(id));
@@ -717,6 +718,9 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
 
     const offerRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
       Queue.offer(runtimeEventQueue, event).pipe(Effect.asVoid);
+
+    const offerApprovalEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
+      PubSub.publish(approvalEventPubSub, event).pipe(Effect.asVoid);
 
     const logNativeSdkMessage = (
       context: ClaudeSessionContext,
@@ -1446,6 +1450,14 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
             });
             return;
           case "compact_boundary":
+            // After compaction old message UUIDs are invalidated. Update
+            // lastAssistantUuid to the compact boundary's own UUID so the
+            // resume cursor no longer references a stale pre-compaction UUID.
+            // Without this the SDK throws "No message found with message.uuid
+            // of: <old-uuid>" on the next turn or session resume.
+            context.lastAssistantUuid = message.uuid;
+            yield* updateResumeCursor(context);
+
             yield* offerRuntimeEvent({
               ...base,
               type: "thread.state.changed",
@@ -1693,6 +1705,12 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                 return;
               }
               const message = toMessage(Cause.squash(cause), "Claude runtime stream failed.");
+              // The Claude CLI emits "NON-FATAL:" errors for benign conditions
+              // like lock contention in multi-process scenarios. These are
+              // informational and should not surface as failures.
+              if (message.includes("NON-FATAL")) {
+                return;
+              }
               yield* emitRuntimeError(context, message, cause);
               yield* completeTurn(context, "failed", message);
               // Clean up the dead session so subsequent interactions trigger a
@@ -1897,7 +1915,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                 };
 
                 const stamp = yield* makeEventStamp();
-                yield* offerRuntimeEvent({
+                const userInputEvent: ProviderRuntimeEvent = {
                   type: "user-input.requested",
                   eventId: stamp.eventId,
                   provider: PROVIDER,
@@ -1920,7 +1938,9 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                     method: "canUseTool/AskUserQuestion",
                     payload: { toolName, input: toolInput },
                   },
-                });
+                };
+                yield* offerRuntimeEvent(userInputEvent);
+                yield* offerApprovalEvent(userInputEvent);
 
                 context.pendingUserQuestions.set(requestId, pending);
 
@@ -1987,7 +2007,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
               };
 
               const requestedStamp = yield* makeEventStamp();
-              yield* offerRuntimeEvent({
+              const approvalEvent: ProviderRuntimeEvent = {
                 type: "request.opened",
                 eventId: requestedStamp.eventId,
                 provider: PROVIDER,
@@ -2023,7 +2043,9 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                     input: toolInput,
                   },
                 },
-              });
+              };
+              yield* offerRuntimeEvent(approvalEvent);
+              yield* offerApprovalEvent(approvalEvent);
 
               pendingApprovals.set(requestId, pendingApproval);
 
@@ -2118,7 +2140,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
               };
 
               const stamp = yield* makeEventStamp();
-              yield* offerRuntimeEvent({
+              const elicitationEvent: ProviderRuntimeEvent = {
                 type: "user-input.requested",
                 eventId: stamp.eventId,
                 provider: PROVIDER,
@@ -2148,7 +2170,9 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
                     elicitationId: request.elicitationId,
                   },
                 },
-              });
+              };
+              yield* offerRuntimeEvent(elicitationEvent);
+              yield* offerApprovalEvent(elicitationEvent);
 
               context.pendingElicitations.set(requestId, pending);
 
@@ -2649,6 +2673,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
       mcpToggleServer,
       stopAll,
       streamEvents: Stream.fromQueue(runtimeEventQueue),
+      streamApprovalEvents: Stream.fromPubSub(approvalEventPubSub),
     } satisfies ClaudeCodeAdapterShape;
   });
 }

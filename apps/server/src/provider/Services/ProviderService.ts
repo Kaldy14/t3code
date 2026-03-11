@@ -166,6 +166,13 @@ export interface ProviderServiceShape {
    * Fan-out is owned by ProviderService (not by a standalone event-bus service).
    */
   readonly streamEvents: Stream.Stream<ProviderRuntimeEvent>;
+
+  /**
+   * Fast-path approval event stream. Subscribers receive approval/permission
+   * events as soon as they are emitted by adapters, bypassing the main
+   * runtime event processing pipeline.
+   */
+  readonly streamApprovalEvents?: Stream.Stream<ProviderRuntimeEvent>;
 }
 
 /**

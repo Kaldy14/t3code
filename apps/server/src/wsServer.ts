@@ -644,6 +644,17 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     }),
   ).pipe(Effect.forkIn(subscriptionsScope));
 
+  // Fast-path: push approval events directly to clients, bypassing orchestration processing.
+  if (liveProviderService.streamApprovalEvents) {
+    yield* Stream.runForEach(liveProviderService.streamApprovalEvents, (event) =>
+      broadcastPush({
+        type: "push",
+        channel: ORCHESTRATION_WS_CHANNELS.approvalFastPath,
+        data: event,
+      }),
+    ).pipe(Effect.forkIn(subscriptionsScope));
+  }
+
   yield* Stream.runForEach(keybindingsManager.changes, (event) =>
     broadcastPush({
       type: "push",

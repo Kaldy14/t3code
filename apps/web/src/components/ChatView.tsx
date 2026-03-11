@@ -23,6 +23,7 @@ import {
   OrchestrationThreadActivity,
   RuntimeMode,
   ProviderInteractionMode,
+  REASONING_EFFORT_OPTIONS_BY_PROVIDER,
 } from "@t3tools/contracts";
 import {
   getDefaultModel,
@@ -165,6 +166,7 @@ import {
   LockOpenIcon,
   Undo2Icon,
   XIcon,
+  ZapIcon,
   CopyIcon,
   CheckIcon,
 } from "lucide-react";
@@ -1000,6 +1002,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const planSidebarOpenOnNextThreadRef = useRef(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
+  const terminalMountedThreadsRef = useRef(new Set<string>());
   const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<string | null>(null);
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
@@ -4336,11 +4339,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
           </div>
 
           {/* Input bar */}
-          <div className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-1" : "pb-3 sm:pb-4")}>
+          <div className={cn("px-3 pt-1.5 sm:px-5 sm:pt-2", isGitRepo ? "pb-2.5" : "pb-3 sm:pb-4")}>
             <form
               ref={composerFormRef}
               onSubmit={onSend}
-              className="mx-auto w-full min-w-0 max-w-3xl"
+              className="mx-auto w-full min-w-0 max-w-[50rem]"
               data-chat-composer-form="true"
             >
               <div
@@ -4378,10 +4381,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     />
                   </div>
                 ) : queuedMessage ? (
-                  <div className="rounded-t-[19px] border-b border-border/65 bg-amber-500/8">
+                  <div className="rounded-t-[19px] border-b border-border/65 bg-primary/5">
                     <div className="flex items-center gap-2 px-3.5 py-2 sm:px-4">
                       <div className="flex min-w-0 flex-1 items-center gap-2">
-                        <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[11px] font-medium text-amber-600 dark:text-amber-400">
+                        <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
                           Queued
                         </span>
                         <span className="truncate text-sm text-muted-foreground">
@@ -4567,7 +4570,10 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         model={selectedModelForPickerWithCustomFallback}
                         lockedProvider={lockedProvider}
                         modelOptionsByProvider={modelOptionsByProvider}
+                        effort={selectedEffort}
+                        effortOptionsByProvider={REASONING_EFFORT_OPTIONS_BY_PROVIDER}
                         onProviderModelChange={onProviderModelSelect}
+                        onEffortChange={onEffortSelect}
                       />
 
                       {isComposerFooterCompact ? (
@@ -4576,11 +4582,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           interactionMode={interactionMode}
                           planSidebarOpen={planSidebarOpen}
                           runtimeMode={runtimeMode}
-                          selectedEffort={selectedEffort}
                           selectedProvider={selectedProvider}
                           selectedCodexFastModeEnabled={selectedCodexFastModeEnabled}
-                          reasoningOptions={reasoningOptions}
-                          onEffortSelect={onEffortSelect}
                           onCodexFastModeChange={onCodexFastModeChange}
                           onToggleInteractionMode={toggleInteractionMode}
                           onTogglePlanSidebar={togglePlanSidebar}
@@ -4588,32 +4591,30 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         />
                       ) : (
                         <>
-                          {selectedProvider === "codex" && selectedEffort != null ? (
+                          {selectedProvider === "codex" ? (
                             <>
                               <Separator
                                 orientation="vertical"
                                 className="mx-0.5 hidden h-4 sm:block"
                               />
-                              <CodexTraitsPicker
-                                effort={selectedEffort}
-                                fastModeEnabled={selectedCodexFastModeEnabled}
-                                options={reasoningOptions}
-                                onEffortChange={onEffortSelect}
-                                onFastModeChange={onCodexFastModeChange}
-                              />
-                            </>
-                          ) : supportsReasoningEffort && selectedEffort != null ? (
-                            <>
-                              <Separator
-                                orientation="vertical"
-                                className="mx-0.5 hidden h-4 sm:block"
-                              />
-                              <EffortPicker
-                                effort={selectedEffort}
-                                options={reasoningOptions}
-                                defaultEffort={getDefaultReasoningEffort(selectedProvider)}
-                                onEffortChange={onEffortSelect}
-                              />
+                              <Button
+                                variant="ghost"
+                                className={cn(
+                                  "shrink-0 whitespace-nowrap px-2 sm:px-3",
+                                  selectedCodexFastModeEnabled
+                                    ? "text-foreground/80 hover:text-foreground"
+                                    : "text-muted-foreground/70 hover:text-foreground/80",
+                                )}
+                                size="sm"
+                                type="button"
+                                onClick={() => onCodexFastModeChange(!selectedCodexFastModeEnabled)}
+                                title={selectedCodexFastModeEnabled ? "Fast mode on" : "Fast mode off"}
+                              >
+                                <ZapIcon className="size-3.5" />
+                                <span className="sr-only sm:not-sr-only">
+                                  {selectedCodexFastModeEnabled ? "Fast" : "Normal"}
+                                </span>
+                              </Button>
                             </>
                           ) : null}
 
@@ -4686,8 +4687,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                             </TooltipPopup>
                           </Tooltip>
 
-                          {/* MCP servers */}
-                          {activeThreadId && (
+                          {/* MCP servers (only supported by Claude Code) */}
+                          {activeThreadId && selectedProvider === "claudeCode" && (
                             <>
                               <Separator
                                 orientation="vertical"
@@ -4902,7 +4903,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           {queuedMessage ? (
                             <button
                               type="button"
-                              className="flex h-8 items-center gap-1.5 rounded-full bg-amber-500/90 px-3 text-xs font-medium text-white transition-all duration-150 hover:bg-amber-500 hover:scale-105"
+                              className="flex h-8 items-center gap-1.5 rounded-full bg-primary px-3 text-xs font-medium text-primary-foreground transition-all duration-150 hover:bg-primary/90 hover:scale-105"
                               onClick={() => void onSteer()}
                               aria-label="Steer — interrupt and send queued message"
                             >
@@ -5091,7 +5092,11 @@ export default function ChatView({ threadId }: ChatViewProps) {
       {/* end horizontal flex container */}
 
       {(() => {
-        if (!terminalState.terminalOpen || !activeProject) {
+        if (!activeProject) return null;
+        if (terminalState.terminalOpen && activeThreadId) {
+          terminalMountedThreadsRef.current.add(activeThreadId);
+        }
+        if (!activeThreadId || !terminalMountedThreadsRef.current.has(activeThreadId)) {
           return null;
         }
         return (
@@ -5106,6 +5111,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
             terminalGroups={terminalState.terminalGroups}
             activeTerminalGroupId={terminalState.activeTerminalGroupId}
             focusRequestId={terminalFocusRequestId}
+            hidden={!terminalState.terminalOpen}
             onSplitTerminal={splitTerminal}
             onNewTerminal={createNewTerminal}
             splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
@@ -7060,13 +7066,21 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   modelOptionsByProvider: Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>>;
   compact?: boolean;
   disabled?: boolean;
+  effort: ProviderEffort | null;
+  effortOptionsByProvider: Record<ProviderKind, readonly ProviderEffort[]>;
   onProviderModelChange: (provider: ProviderKind, model: ModelSlug) => void;
+  onEffortChange: (effort: ProviderEffort) => void;
 }) {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const selectedProviderOptions = props.modelOptionsByProvider[props.provider];
   const selectedModelLabel =
     selectedProviderOptions.find((option) => option.slug === props.model)?.name ?? props.model;
   const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[props.provider];
+  const currentEffortOptions = props.effortOptionsByProvider[props.provider];
+  const effortLabel =
+    currentEffortOptions.length > 0 && props.effort
+      ? (EFFORT_LABEL[props.effort] ?? props.effort)
+      : null;
 
   return (
     <Menu
@@ -7102,7 +7116,10 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               props.provider === "claudeCode" ? "" : "text-muted-foreground/70",
             )}
           />
-          <span className="truncate">{selectedModelLabel}</span>
+          <span className="truncate">
+            {selectedModelLabel}
+            {effortLabel ? ` · ${effortLabel}` : ""}
+          </span>
           <ChevronDownIcon aria-hidden="true" className="size-3 opacity-60" />
         </span>
       </MenuTrigger>
@@ -7111,6 +7128,9 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
           const OptionIcon = PROVIDER_ICON_BY_PROVIDER[option.value];
           const isDisabledByProviderLock =
             props.lockedProvider !== null && props.lockedProvider !== option.value;
+          const providerEffortOptions = props.effortOptionsByProvider[option.value];
+          const hasEffortOptions = providerEffortOptions.length > 0;
+          const providerDefaultEffort = getDefaultReasoningEffort(option.value);
           return (
             <MenuSub key={option.value}>
               <MenuSubTrigger disabled={isDisabledByProviderLock}>
@@ -7122,32 +7142,91 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
               </MenuSubTrigger>
               <MenuSubPopup className="[--available-height:min(24rem,70vh)]">
                 <MenuGroup>
-                  <MenuRadioGroup
-                    value={props.provider === option.value ? props.model : ""}
-                    onValueChange={(value) => {
-                      if (props.disabled) return;
-                      if (isDisabledByProviderLock) return;
-                      if (!value) return;
-                      const resolvedModel = resolveModelForProviderPicker(
-                        option.value,
-                        value,
-                        props.modelOptionsByProvider[option.value],
-                      );
-                      if (!resolvedModel) return;
-                      props.onProviderModelChange(option.value, resolvedModel);
-                      setIsMenuOpen(false);
-                    }}
-                  >
-                    {props.modelOptionsByProvider[option.value].map((modelOption) => (
-                      <MenuRadioItem
-                        key={`${option.value}:${modelOption.slug}`}
-                        value={modelOption.slug}
-                        onClick={() => setIsMenuOpen(false)}
-                      >
-                        {modelOption.name}
-                      </MenuRadioItem>
-                    ))}
-                  </MenuRadioGroup>
+                  {hasEffortOptions
+                    ? props.modelOptionsByProvider[option.value].map((modelOption) => {
+                        const isSelectedModel =
+                          props.provider === option.value && props.model === modelOption.slug;
+                        return (
+                          <MenuSub key={`${option.value}:${modelOption.slug}`}>
+                            <MenuSubTrigger
+                              className={cn(
+                                isSelectedModel && "font-medium text-foreground",
+                              )}
+                            >
+                              {modelOption.name}
+                              {isSelectedModel && (
+                                <span className="ms-auto text-primary">✓</span>
+                              )}
+                            </MenuSubTrigger>
+                            <MenuSubPopup>
+                              <MenuGroup>
+                                <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
+                                  Effort
+                                </div>
+                                <MenuRadioGroup
+                                  value={isSelectedModel && props.effort ? props.effort : ""}
+                                  onValueChange={(value) => {
+                                    if (props.disabled) return;
+                                    if (isDisabledByProviderLock) return;
+                                    if (!value) return;
+                                    const nextEffort = providerEffortOptions.find(
+                                      (e) => e === value,
+                                    );
+                                    if (!nextEffort) return;
+                                    if (!isSelectedModel) {
+                                      const resolvedModel = resolveModelForProviderPicker(
+                                        option.value,
+                                        modelOption.slug,
+                                        props.modelOptionsByProvider[option.value],
+                                      );
+                                      if (resolvedModel) {
+                                        props.onProviderModelChange(option.value, resolvedModel);
+                                      }
+                                    }
+                                    props.onEffortChange(nextEffort);
+                                    setIsMenuOpen(false);
+                                  }}
+                                >
+                                  {providerEffortOptions.map((effort) => (
+                                    <MenuRadioItem key={effort} value={effort}>
+                                      {EFFORT_LABEL[effort] ?? effort}
+                                      {effort === providerDefaultEffort ? " (default)" : ""}
+                                    </MenuRadioItem>
+                                  ))}
+                                </MenuRadioGroup>
+                              </MenuGroup>
+                            </MenuSubPopup>
+                          </MenuSub>
+                        );
+                      })
+                    : (
+                        <MenuRadioGroup
+                          value={props.provider === option.value ? props.model : ""}
+                          onValueChange={(value) => {
+                            if (props.disabled) return;
+                            if (isDisabledByProviderLock) return;
+                            if (!value) return;
+                            const resolvedModel = resolveModelForProviderPicker(
+                              option.value,
+                              value,
+                              props.modelOptionsByProvider[option.value],
+                            );
+                            if (!resolvedModel) return;
+                            props.onProviderModelChange(option.value, resolvedModel);
+                            setIsMenuOpen(false);
+                          }}
+                        >
+                          {props.modelOptionsByProvider[option.value].map((modelOption) => (
+                            <MenuRadioItem
+                              key={`${option.value}:${modelOption.slug}`}
+                              value={modelOption.slug}
+                              onClick={() => setIsMenuOpen(false)}
+                            >
+                              {modelOption.name}
+                            </MenuRadioItem>
+                          ))}
+                        </MenuRadioGroup>
+                      )}
                 </MenuGroup>
               </MenuSubPopup>
             </MenuSub>
@@ -7202,24 +7281,13 @@ const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(pr
   interactionMode: ProviderInteractionMode;
   planSidebarOpen: boolean;
   runtimeMode: RuntimeMode;
-  selectedEffort: ProviderEffort | null;
   selectedProvider: ProviderKind;
   selectedCodexFastModeEnabled: boolean;
-  reasoningOptions: ReadonlyArray<ProviderEffort>;
-  onEffortSelect: (effort: ProviderEffort) => void;
   onCodexFastModeChange: (enabled: boolean) => void;
   onToggleInteractionMode: () => void;
   onTogglePlanSidebar: () => void;
   onToggleRuntimeMode: () => void;
 }) {
-  const defaultReasoningEffort = getDefaultReasoningEffort("codex");
-  const reasoningLabelByOption: Record<ProviderEffort, string> = {
-    low: "Low",
-    medium: "Medium",
-    high: "High",
-    xhigh: "Extra High",
-  };
-
   return (
     <Menu>
       <MenuTrigger
@@ -7235,28 +7303,8 @@ const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(pr
         <EllipsisIcon aria-hidden="true" className="size-4" />
       </MenuTrigger>
       <MenuPopup align="start">
-        {props.selectedProvider === "codex" && props.selectedEffort != null ? (
+        {props.selectedProvider === "codex" ? (
           <>
-            <MenuGroup>
-              <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Reasoning</div>
-              <MenuRadioGroup
-                value={props.selectedEffort}
-                onValueChange={(value) => {
-                  if (!value) return;
-                  const nextEffort = props.reasoningOptions.find((option) => option === value);
-                  if (!nextEffort) return;
-                  props.onEffortSelect(nextEffort);
-                }}
-              >
-                {props.reasoningOptions.map((effort) => (
-                  <MenuRadioItem key={effort} value={effort}>
-                    {reasoningLabelByOption[effort]}
-                    {effort === defaultReasoningEffort ? " (default)" : ""}
-                  </MenuRadioItem>
-                ))}
-              </MenuRadioGroup>
-            </MenuGroup>
-            <MenuDivider />
             <MenuGroup>
               <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Fast Mode</div>
               <MenuRadioGroup

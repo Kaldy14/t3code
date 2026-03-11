@@ -167,4 +167,11 @@ export interface ProviderAdapterShape<TError> {
    * Canonical runtime event stream emitted by this adapter.
    */
   readonly streamEvents: Stream.Stream<ProviderRuntimeEvent>;
+
+  /**
+   * Fast-path stream for latency-critical approval/permission events.
+   * Approval events also appear in `streamEvents` — this is a duplicate
+   * channel that bypasses queuing so the UI can surface requests immediately.
+   */
+  readonly streamApprovalEvents?: Stream.Stream<ProviderRuntimeEvent>;
 }

@@ -24,7 +24,7 @@ import {
   type McpServerStatus,
   type McpSetServersResult,
 } from "@t3tools/contracts";
-import { Effect, Layer, Option, PubSub, Queue, Schema, SchemaIssue, Stream } from "effect";
+import { Effect, Layer, Option, PubSub, Schema, SchemaIssue, Stream } from "effect";
 
 import { ProviderValidationError } from "../Errors.ts";
 import { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
@@ -138,17 +138,17 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
 
     const registry = yield* ProviderAdapterRegistry;
     const directory = yield* ProviderSessionDirectory;
-    const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
 
     const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
-      Effect.succeed(event).pipe(
-        Effect.tap((canonicalEvent) =>
-          canonicalEventLogger ? canonicalEventLogger.write(canonicalEvent, null) : Effect.void,
-        ),
-        Effect.flatMap((canonicalEvent) => PubSub.publish(runtimeEventPubSub, canonicalEvent)),
-        Effect.asVoid,
-      );
+      Effect.gen(function* () {
+        // Publish to subscribers immediately — don't block fan-out on disk I/O.
+        yield* PubSub.publish(runtimeEventPubSub, event);
+        // Fire-and-forget canonical log write so it never stalls the pipeline.
+        if (canonicalEventLogger) {
+          yield* Effect.forkDetach(canonicalEventLogger.write(event, null));
+        }
+      });
 
     const upsertSessionBinding = (
       session: ProviderSession,
@@ -169,19 +169,23 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       registry.getByProvider(provider),
     );
 
-    const processRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
-      publishRuntimeEvent(event);
-
-    const worker = Effect.forever(
-      Queue.take(runtimeEventQueue).pipe(Effect.flatMap(processRuntimeEvent)),
-    );
-    yield* Effect.forkScoped(worker);
-
+    // Each adapter gets its own fiber — events from different adapters
+    // are processed in parallel instead of funnelling through one queue.
     yield* Effect.forEach(adapters, (adapter) =>
-      Stream.runForEach(adapter.streamEvents, (event) =>
-        Queue.offer(runtimeEventQueue, event).pipe(Effect.asVoid),
-      ).pipe(Effect.forkScoped),
+      Stream.runForEach(adapter.streamEvents, publishRuntimeEvent).pipe(Effect.forkScoped),
     ).pipe(Effect.asVoid);
+
+    // Merge approval fast-path streams from all adapters that support them.
+    const approvalStreams = adapters
+      .filter(
+        (a): a is typeof a & { streamApprovalEvents: Stream.Stream<ProviderRuntimeEvent> } =>
+          a.streamApprovalEvents !== undefined,
+      )
+      .map((a) => a.streamApprovalEvents);
+    const mergedApprovalStream =
+      approvalStreams.length > 0
+        ? Stream.mergeAll(approvalStreams, { concurrency: "unbounded" })
+        : undefined;
 
     const recoverSessionForThread = (input: {
       readonly binding: ProviderRuntimeBinding;
@@ -710,6 +714,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       mcpToggleServer,
       stopAll: runStopAll,
       streamEvents: Stream.fromPubSub(runtimeEventPubSub),
+      ...(mergedApprovalStream ? { streamApprovalEvents: mergedApprovalStream } : {}),
     } satisfies ProviderServiceShape;
   });
 
