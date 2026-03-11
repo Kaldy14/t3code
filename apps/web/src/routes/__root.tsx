@@ -1,4 +1,5 @@
-import { ThreadId } from "@t3tools/contracts";
+import { type OrchestrationSessionStatus, ThreadId } from "@t3tools/contracts";
+import type { SessionPhase } from "../types";
 import {
   Outlet,
   createRootRouteWithContext,
@@ -28,6 +29,27 @@ import {
 } from "../lib/notifications";
 import { providerQueryKeys } from "../lib/providerReactQuery";
 import { collectActiveTerminalThreadIds } from "../lib/terminalStateCleanup";
+
+/** Lightweight mapping duplicating the store's toLegacySessionStatus so we can
+ *  eagerly patch background-thread session status without a full snapshot sync. */
+function toLegacySessionStatusFromOrchestration(
+  status: OrchestrationSessionStatus,
+): SessionPhase | "error" | "closed" {
+  switch (status) {
+    case "starting":
+      return "connecting";
+    case "running":
+      return "running";
+    case "error":
+      return "error";
+    case "ready":
+    case "interrupted":
+      return "ready";
+    case "idle":
+    case "stopped":
+      return "closed";
+  }
+}
 
 export const Route = createRootRouteWithContext<{
   queryClient: QueryClient;
@@ -262,6 +284,29 @@ function EventRouter() {
             void navigate({ to: "/$threadId", params: { threadId } });
           },
         );
+
+        // For background threads the full snapshot sync is deferred, so the
+        // sidebar would keep showing stale "Working" status indefinitely.
+        // Eagerly patch session status in the store so the UI reflects the
+        // real state without waiting for a full sync.
+        if (!isCurrentThread && thread?.session) {
+          useStore.setState((state) => ({
+            threads: state.threads.map((t) => {
+              if (t.id !== threadId || !t.session) return t;
+              return {
+                ...t,
+                session: {
+                  ...t.session,
+                  orchestrationStatus: session.status,
+                  status: toLegacySessionStatusFromOrchestration(session.status),
+                  activeTurnId: session.activeTurnId ?? undefined,
+                  updatedAt: session.updatedAt,
+                  ...(session.lastError ? { lastError: session.lastError } : {}),
+                },
+              };
+            }),
+          }));
+        }
       }
 
       // Only trigger expensive full snapshot sync for the currently viewed thread

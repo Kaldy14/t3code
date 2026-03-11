@@ -1044,21 +1044,34 @@ const make = Effect.gen(function* () {
                 : (thread.session?.lastError ?? null);
 
         if (shouldApplyThreadLifecycle) {
-          yield* orchestrationEngine.dispatch({
-            type: "thread.session.set",
-            commandId: providerCommandId(event, "thread-session-set"),
-            threadId: thread.id,
-            session: {
+          // State-machine guard: once a session reaches a terminal status
+          // ("stopped"), don't allow racing events (e.g. a turn.completed
+          // that maps to "ready") to flip it backward.  Only a fresh
+          // session.started / turn.started may re-activate it.
+          const currentStatus = thread.session?.status;
+          const isBackwardTransition =
+            currentStatus === "stopped" &&
+            status !== "stopped" &&
+            event.type !== "session.started" &&
+            event.type !== "turn.started";
+
+          if (!isBackwardTransition) {
+            yield* orchestrationEngine.dispatch({
+              type: "thread.session.set",
+              commandId: providerCommandId(event, "thread-session-set"),
               threadId: thread.id,
-              status,
-              providerName: event.provider,
-              runtimeMode: thread.session?.runtimeMode ?? "full-access",
-              activeTurnId: nextActiveTurnId,
-              lastError,
-              updatedAt: now,
-            },
-            createdAt: now,
-          });
+              session: {
+                threadId: thread.id,
+                status,
+                providerName: event.provider,
+                runtimeMode: thread.session?.runtimeMode ?? "full-access",
+                activeTurnId: nextActiveTurnId,
+                lastError,
+                updatedAt: now,
+              },
+              createdAt: now,
+            });
+          }
         }
       }
 

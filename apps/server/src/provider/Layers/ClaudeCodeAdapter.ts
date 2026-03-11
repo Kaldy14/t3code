@@ -149,6 +149,8 @@ interface ClaudeSessionContext {
   lastAssistantUuid: string | undefined;
   lastThreadStartedId: string | undefined;
   stopped: boolean;
+  /** Set after `interruptTurn` so late SDK status messages don't flip status back to "running". Reset on next turn start. */
+  interrupted: boolean;
   lastPersistedCursorAt: number;
   pendingCursorWrite: unknown | undefined;
   availableSlashCommands: string[];
@@ -1439,6 +1441,12 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
             });
             return;
           case "status":
+            // After an interrupt or stop, the SDK may still emit late status
+            // messages.  Suppress them so they don't flip the orchestration
+            // session status back to "running".
+            if (context.interrupted || context.stopped) {
+              return;
+            }
             yield* offerRuntimeEvent({
               ...base,
               type: "session.state.changed",
@@ -2274,6 +2282,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           lastAssistantUuid: resumeState?.resumeSessionAt,
           lastThreadStartedId: undefined,
           stopped: false,
+          interrupted: false,
           lastPersistedCursorAt: 0,
           pendingCursorWrite: undefined,
           availableSlashCommands: [],
@@ -2375,6 +2384,9 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
 
         const updatedAt = yield* nowIso;
         context.turnState = turnState;
+        // Clear interrupted flag from a previous interrupt so SDK status
+        // messages for the new turn are processed normally.
+        context.interrupted = false;
         context.session = {
           ...context.session,
           status: "running",
@@ -2417,6 +2429,12 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           try: () => context.query.interrupt(),
           catch: (cause) => toRequestError(threadId, "turn/interrupt", cause),
         });
+        // Eagerly mark the session as no longer running so that late-arriving
+        // SDK status messages (session.state.changed with state "running")
+        // emitted after the interrupt don't flip the orchestration status back
+        // to "running".  The adapter-level `interrupted` flag is checked in
+        // handleSystemMessage before emitting session.state.changed events.
+        context.interrupted = true;
       });
 
     const readThread: ClaudeCodeAdapterShape["readThread"] = (threadId) =>
