@@ -2,6 +2,7 @@ import {
   ArrowLeftIcon,
   ChevronRightIcon,
   FolderIcon,
+  GitBranchIcon,
   GripVerticalIcon,
   GitPullRequestIcon,
   PlusIcon,
@@ -87,6 +88,7 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
 import {
   type ThreadPr,
+  formatBranchForDisplay,
   formatRelativeTime,
   threadStatusPill,
   terminalStatusFromRunningIds,
@@ -1534,7 +1536,7 @@ export default function Sidebar({ onSearchClick }: { onSearchClick?: () => void 
                                       render={<div role="button" tabIndex={0} />}
                                       size="sm"
                                       isActive={isActive}
-                                      className={`h-7 w-full translate-x-0 cursor-default justify-start px-2 text-left select-none hover:bg-accent hover:text-foreground focus-visible:ring-0 ${
+                                      className={`group/thread h-7 w-full translate-x-0 cursor-default justify-start px-2 text-left select-none hover:bg-accent hover:text-foreground focus-visible:ring-0 ${
                                         isSelected
                                           ? "bg-primary/15 text-foreground dark:bg-primary/10"
                                           : isActive
@@ -1662,7 +1664,7 @@ export default function Sidebar({ onSearchClick }: { onSearchClick?: () => void 
                                           </span>
                                         )}
                                       </div>
-                                      <div className="ml-auto flex shrink-0 items-center gap-1.5">
+                                      <div className="relative ml-auto flex shrink-0 items-center gap-1.5">
                                         {terminalStatus && (
                                           <span
                                             role="img"
@@ -1676,7 +1678,9 @@ export default function Sidebar({ onSearchClick }: { onSearchClick?: () => void 
                                           </span>
                                         )}
                                         <span
-                                          className={`text-[10px] ${
+                                          className={`text-[10px] transition-opacity ${
+                                            thread.branch ? "group-hover/thread:opacity-0" : ""
+                                          } ${
                                             isHighlighted
                                               ? "text-foreground/65"
                                               : "text-muted-foreground/40"
@@ -1685,6 +1689,21 @@ export default function Sidebar({ onSearchClick }: { onSearchClick?: () => void 
                                           {formatRelativeTime(thread.createdAt)}
                                         </span>
                                       </div>
+                                      {thread.branch && (
+                                        <span
+                                          className={`pointer-events-none absolute inset-0 inline-flex items-center gap-0.5 rounded-sm bg-sidebar px-2 text-[10px] opacity-0 transition-opacity group-hover/thread:opacity-100 ${
+                                            isHighlighted
+                                              ? "text-muted-foreground/70"
+                                              : "text-muted-foreground/50"
+                                          }`}
+                                          title={thread.branch}
+                                        >
+                                          <GitBranchIcon className="size-2.5 shrink-0" />
+                                          <span className="truncate">
+                                            {formatBranchForDisplay(thread.branch)}
+                                          </span>
+                                        </span>
+                                      )}
                                     </SidebarMenuSubButton>
                                   </SidebarMenuSubItem>
                                 );

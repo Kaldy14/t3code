@@ -685,6 +685,15 @@ function revokeBlobPreviewUrl(previewUrl: string | undefined): void {
   URL.revokeObjectURL(previewUrl);
 }
 
+/**
+ * Module-level store for queued messages so they survive thread switches.
+ * Blob preview URLs are intentionally kept alive while stored here.
+ */
+const queuedMessagesByThread = new Map<
+  ThreadId,
+  { text: string; images: ComposerImageAttachment[] }
+>();
+
 function revokeUserMessagePreviewUrls(message: ChatMessage): void {
   if (message.role !== "user" || !message.attachments) {
     return;
@@ -2633,14 +2642,24 @@ export default function ChatView({ threadId }: ChatViewProps) {
       return [];
     });
     setSendPhase("idle");
-    setQueuedMessage((prev) => {
-      if (prev) {
-        for (const img of prev.images) {
-          revokeBlobPreviewUrl(img.previewUrl);
+    // Restore a previously-saved queued message for this thread, or clear.
+    const saved = queuedMessagesByThread.get(threadId);
+    if (saved) {
+      queuedMessagesByThread.delete(threadId);
+      setQueuedMessage(saved);
+    } else {
+      setQueuedMessage((prev) => {
+        if (prev) {
+          for (const img of prev.images) {
+            revokeBlobPreviewUrl(img.previewUrl);
+          }
         }
-      }
-      return null;
-    });
+        return null;
+      });
+    }
+    // Reset prevPhaseRef so the auto-send effect doesn't misinterpret a
+    // cross-thread phase value as a running→ready transition.
+    prevPhaseRef.current = phase;
     setSendStartedAt(null);
     setComposerHighlightedItemId(null);
     setComposerCursor(promptRef.current.length);
@@ -2648,7 +2667,33 @@ export default function ChatView({ threadId }: ChatViewProps) {
     dragDepthRef.current = 0;
     setIsDragOverComposer(false);
     setExpandedImage(null);
-  }, [threadId]);
+
+    // If we restored a queued message and the turn already completed while
+    // the user was on another thread, auto-send it now.
+    // Use stable zustand actions directly so we don't need them in the dep array.
+    if (saved && phase === "ready") {
+      promptRef.current = saved.text;
+      setComposerDraftPrompt(threadId, saved.text);
+      if (saved.images.length > 0) {
+        addComposerDraftImages(threadId, saved.images);
+      }
+      window.requestAnimationFrame(() => {
+        if (sendInFlightRef.current) return;
+        composerFormRef.current?.requestSubmit();
+      });
+    }
+
+    return () => {
+      // Save the current queued message before switching away so it can be
+      // restored when the user navigates back to this thread.
+      const current = queuedMessageRef.current;
+      if (current) {
+        queuedMessagesByThread.set(threadId, current);
+      } else {
+        queuedMessagesByThread.delete(threadId);
+      }
+    };
+  }, [threadId]); // eslint-disable-line -- phase, setComposerDraftPrompt, addComposerDraftImages are stable or captured correctly from the threadId-triggered render
 
   // Auto-send queued message when the running turn completes.
   // Track previous phase to detect running -> ready transition specifically.
@@ -4402,27 +4447,54 @@ export default function ChatView({ threadId }: ChatViewProps) {
                           {queuedMessage.text || `${queuedMessage.images.length} image(s)`}
                         </span>
                       </div>
-                      <button
-                        type="button"
-                        className="shrink-0 rounded-md p-1 text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground/80"
-                        onClick={() => setQueuedMessage(null)}
-                        aria-label="Cancel queued message"
-                      >
-                        <svg
-                          width="14"
-                          height="14"
-                          viewBox="0 0 14 14"
-                          fill="none"
-                          aria-hidden="true"
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        {phase === "running" && (
+                          <button
+                            type="button"
+                            className="flex h-7 items-center gap-1.5 rounded-full bg-primary px-2.5 text-[11px] font-medium text-primary-foreground transition-all duration-150 hover:bg-primary/90 hover:scale-105"
+                            onClick={() => void onSteer()}
+                            aria-label="Steer — interrupt and send queued message"
+                          >
+                            <svg
+                              width="12"
+                              height="12"
+                              viewBox="0 0 12 12"
+                              fill="none"
+                              aria-hidden="true"
+                            >
+                              <path
+                                d="M6 10V2M6 2L2.5 5.5M6 2L9.5 5.5"
+                                stroke="currentColor"
+                                strokeWidth="1.5"
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                              />
+                            </svg>
+                            Steer
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="shrink-0 rounded-md p-1 text-muted-foreground/60 transition-colors hover:bg-muted/40 hover:text-foreground/80"
+                          onClick={() => setQueuedMessage(null)}
+                          aria-label="Cancel queued message"
                         >
-                          <path
-                            d="M3.5 3.5L10.5 10.5M10.5 3.5L3.5 10.5"
-                            stroke="currentColor"
-                            strokeWidth="1.5"
-                            strokeLinecap="round"
-                          />
-                        </svg>
-                      </button>
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 14 14"
+                            fill="none"
+                            aria-hidden="true"
+                          >
+                            <path
+                              d="M3.5 3.5L10.5 10.5M10.5 3.5L3.5 10.5"
+                              stroke="currentColor"
+                              strokeWidth="1.5"
+                              strokeLinecap="round"
+                            />
+                          </svg>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 ) : null}
@@ -4911,31 +4983,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
                         </div>
                       ) : phase === "running" ? (
                         <div className="flex items-center gap-1.5">
-                          {queuedMessage ? (
-                            <button
-                              type="button"
-                              className="flex h-8 items-center gap-1.5 rounded-full bg-primary px-3 text-xs font-medium text-primary-foreground transition-all duration-150 hover:bg-primary/90 hover:scale-105"
-                              onClick={() => void onSteer()}
-                              aria-label="Steer — interrupt and send queued message"
-                            >
-                              <svg
-                                width="12"
-                                height="12"
-                                viewBox="0 0 12 12"
-                                fill="none"
-                                aria-hidden="true"
-                              >
-                                <path
-                                  d="M6 10V2M6 2L2.5 5.5M6 2L9.5 5.5"
-                                  stroke="currentColor"
-                                  strokeWidth="1.5"
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                />
-                              </svg>
-                              Steer
-                            </button>
-                          ) : null}
                           <button
                             type="button"
                             className="flex size-8 items-center justify-center rounded-full bg-rose-500/90 text-white transition-all duration-150 hover:bg-rose-500 hover:scale-105 sm:h-8 sm:w-8"

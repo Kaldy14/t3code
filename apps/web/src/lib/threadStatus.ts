@@ -110,6 +110,32 @@ export function terminalStatusFromRunningIds(
   };
 }
 
+const BRANCH_PREFIXES_TO_STRIP = [
+  "feature/",
+  "feat/",
+  "bugfix/",
+  "fix/",
+  "hotfix/",
+  "chore/",
+  "release/",
+  "refactor/",
+  "docs/",
+  "test/",
+  "ci/",
+  "dependabot/",
+];
+
+export function formatBranchForDisplay(branch: string): string {
+  let name = branch;
+  for (const prefix of BRANCH_PREFIXES_TO_STRIP) {
+    if (name.toLowerCase().startsWith(prefix)) {
+      name = name.slice(prefix.length);
+      break;
+    }
+  }
+  return name;
+}
+
 export function prStatusIndicator(pr: ThreadPr): PrStatusIndicator | null {
   if (!pr) return null;
 
