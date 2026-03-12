@@ -68,7 +68,7 @@ import {
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import { Button } from "./ui/button";
 import { Collapsible, CollapsibleContent } from "./ui/collapsible";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import {
   SidebarContent,
   SidebarFooter,
@@ -1532,8 +1532,18 @@ export default function Sidebar({ onSearchClick }: { onSearchClick?: () => void 
                                     className="w-full"
                                     data-thread-item
                                   >
+                                    <TooltipProvider delay={0} closeDelay={0}>
+                                    <Tooltip>
                                     <SidebarMenuSubButton
-                                      render={<div role="button" tabIndex={0} />}
+                                      render={
+                                        thread.branch ? (
+                                          <TooltipTrigger
+                                            render={<div role="button" tabIndex={0} />}
+                                          />
+                                        ) : (
+                                          <div role="button" tabIndex={0} />
+                                        )
+                                      }
                                       size="sm"
                                       isActive={isActive}
                                       className={`group/thread h-7 w-full translate-x-0 cursor-default justify-start px-2 text-left select-none hover:bg-accent hover:text-foreground focus-visible:ring-0 ${
@@ -1678,9 +1688,7 @@ export default function Sidebar({ onSearchClick }: { onSearchClick?: () => void 
                                           </span>
                                         )}
                                         <span
-                                          className={`text-[10px] transition-opacity ${
-                                            thread.branch ? "group-hover/thread:opacity-0" : ""
-                                          } ${
+                                          className={`text-[10px] ${
                                             isHighlighted
                                               ? "text-foreground/65"
                                               : "text-muted-foreground/40"
@@ -1689,20 +1697,17 @@ export default function Sidebar({ onSearchClick }: { onSearchClick?: () => void 
                                           {formatRelativeTime(thread.createdAt)}
                                         </span>
                                       </div>
-                                      {thread.branch && (
-                                        <span
-                                          className="pointer-events-none absolute inset-y-0 left-0 right-0 z-10 flex items-center justify-end px-2 opacity-0 transition-opacity group-hover/thread:opacity-100"
-                                          title={thread.branch}
-                                        >
-                                          <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground shadow-sm">
-                                            <GitBranchIcon className="size-2.5 shrink-0" />
-                                            <span className="truncate">
-                                              {formatBranchForDisplay(thread.branch)}
-                                            </span>
-                                          </span>
-                                        </span>
-                                      )}
                                     </SidebarMenuSubButton>
+                                    {thread.branch && (
+                                      <TooltipPopup side="right" sideOffset={12} arrow>
+                                        <span className="inline-flex items-center gap-1.5">
+                                          <GitBranchIcon className="size-3 shrink-0" />
+                                          {formatBranchForDisplay(thread.branch)}
+                                        </span>
+                                      </TooltipPopup>
+                                    )}
+                                    </Tooltip>
+                                    </TooltipProvider>
                                   </SidebarMenuSubItem>
                                 );
                               })}

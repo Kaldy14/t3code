@@ -1033,6 +1033,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const lastTouchClientYRef = useRef<number | null>(null);
   const pendingUserScrollUpIntentRef = useRef(false);
   const pendingAutoScrollFrameRef = useRef<number | null>(null);
+  const prevActiveTurnInProgressRef = useRef(false);
   const pendingInteractionAnchorRef = useRef<{
     element: HTMLElement;
     top: number;
@@ -1367,6 +1368,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const isSendBusy = sendPhase !== "idle";
   const isPreparingWorktree = sendPhase === "preparing-worktree";
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
+  const activeTurnInProgress = isWorking || !latestTurnSettled;
   const nowIso = new Date(nowTick).toISOString();
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
@@ -2558,6 +2560,30 @@ export default function ChatView({ threadId }: ChatViewProps) {
     if (!shouldAutoScrollRef.current) return;
     scheduleStickToBottom();
   }, [phase, scheduleStickToBottom, timelineEntries]);
+  // When a turn finishes, the virtualization boundary in MessagesTimeline shifts:
+  // rows that were real DOM (non-virtualized) become virtualized with estimated
+  // sizes. If estimates differ from actual heights the viewport jumps.
+  // Compensate by forcing a stick-to-bottom when the transition happens.
+  useEffect(() => {
+    const prev = prevActiveTurnInProgressRef.current;
+    prevActiveTurnInProgressRef.current = activeTurnInProgress;
+    if (!prev || activeTurnInProgress) return;
+    // Turn just finished
+    if (!shouldAutoScrollRef.current) return;
+    forceStickToBottom();
+    // Safety net: the virtualizer may still be re-measuring rows after the
+    // boundary shift. Schedule one more corrective scroll after measurements settle.
+    const timeout = window.setTimeout(() => {
+      if (!shouldAutoScrollRef.current) return;
+      const scrollContainer = messagesScrollRef.current;
+      if (!scrollContainer) return;
+      if (isScrollContainerNearBottom(scrollContainer)) return;
+      scrollMessagesToBottom();
+    }, 120);
+    return () => {
+      window.clearTimeout(timeout);
+    };
+  }, [activeTurnInProgress, forceStickToBottom, scrollMessagesToBottom]);
 
   useEffect(() => {
     setExpandedWorkGroups({});
@@ -4365,7 +4391,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
               currentActivityStatus={currentActivityStatus}
               recentActivityStatuses={recentActivityStatuses}
               hasRunningSubagent={hasRunningSubagent}
-              activeTurnInProgress={isWorking || !latestTurnSettled}
+              activeTurnInProgress={activeTurnInProgress}
               activeTurnStartedAt={activeWorkStartedAt}
               scrollContainer={messagesScrollElement}
               timelineEntries={timelineEntries}
@@ -4434,6 +4460,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
                     <ComposerPlanFollowUpBanner
                       key={activeProposedPlan.id}
                       planTitle={proposedPlanTitle(activeProposedPlan.planMarkdown) ?? null}
+                      planMarkdown={activeProposedPlan.planMarkdown}
+                      cwd={gitCwd ?? undefined}
                     />
                   </div>
                 ) : queuedMessage ? (
@@ -5805,9 +5833,20 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
 
 const ComposerPlanFollowUpBanner = memo(function ComposerPlanFollowUpBanner({
   planTitle,
+  planMarkdown,
+  cwd,
 }: {
   planTitle: string | null;
+  planMarkdown: string;
+  cwd: string | undefined;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  const collapsedPreview = buildCollapsedProposedPlanPreviewMarkdown(planMarkdown, { maxLines: 8 });
+  const fullContent = stripDisplayedPlanMarkdown(planMarkdown);
+  const displayedMarkdown = expanded ? fullContent : collapsedPreview;
+  const lineCount = fullContent.split("\n").filter((l) => l.trim().length > 0).length;
+  const canExpand = lineCount > 8;
+
   return (
     <div className="px-4 py-3.5 sm:px-5 sm:py-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -5816,9 +5855,18 @@ const ComposerPlanFollowUpBanner = memo(function ComposerPlanFollowUpBanner({
           <span className="min-w-0 flex-1 truncate text-sm font-medium">{planTitle}</span>
         ) : null}
       </div>
-      {/* <div className="mt-2 text-xs text-muted-foreground">
-        Review the plan
-      </div> */}
+      <div className="relative mt-3 max-h-72 overflow-y-auto rounded-lg border border-border/50 bg-background/50 p-3 text-sm [scrollbar-width:thin]">
+        <ChatMarkdown text={displayedMarkdown} cwd={cwd} isStreaming={false} />
+      </div>
+      {canExpand ? (
+        <button
+          type="button"
+          className="mt-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          onClick={() => setExpanded((v) => !v)}
+        >
+          {expanded ? "Show less" : "Show full plan"}
+        </button>
+      ) : null}
     </div>
   );
 });

@@ -18,6 +18,7 @@ function TooltipPopup({
   sideOffset = 4,
   side = "top",
   anchor,
+  arrow = false,
   children,
   ...props
 }: TooltipPrimitive.Popup.Props & {
@@ -25,6 +26,7 @@ function TooltipPopup({
   side?: TooltipPrimitive.Positioner.Props["side"];
   sideOffset?: TooltipPrimitive.Positioner.Props["sideOffset"];
   anchor?: TooltipPrimitive.Positioner.Props["anchor"];
+  arrow?: boolean;
 }) {
   return (
     <TooltipPrimitive.Portal>
@@ -44,6 +46,12 @@ function TooltipPopup({
           data-slot="tooltip-popup"
           {...props}
         >
+          {arrow && (
+            <TooltipPrimitive.Arrow
+              className="z-50 h-2 w-2 rotate-45 rounded-[1px] border-b border-l border-border bg-popover data-[side=bottom]:translate-y-[calc(-50%_-_2px)] data-[side=left]:translate-x-[calc(50%_+_2px)] data-[side=right]:translate-x-[calc(-50%_-_2px)] data-[side=top]:translate-y-[calc(50%_+_2px)]"
+              data-slot="tooltip-arrow"
+            />
+          )}
           <TooltipPrimitive.Viewport
             className="relative size-full overflow-clip px-(--viewport-inline-padding) py-1 [--viewport-inline-padding:--spacing(2)] data-instant:transition-none **:data-current:data-ending-style:opacity-0 **:data-current:data-starting-style:opacity-0 **:data-previous:data-ending-style:opacity-0 **:data-previous:data-starting-style:opacity-0 **:data-current:w-[calc(var(--popup-width)-2*var(--viewport-inline-padding)-2px)] **:data-previous:w-[calc(var(--popup-width)-2*var(--viewport-inline-padding)-2px)] **:data-previous:truncate **:data-current:opacity-100 **:data-previous:opacity-100 **:data-current:transition-opacity **:data-previous:transition-opacity"
             data-slot="tooltip-viewport"
