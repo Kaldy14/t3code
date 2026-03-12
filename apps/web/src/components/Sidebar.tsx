@@ -1691,16 +1691,14 @@ export default function Sidebar({ onSearchClick }: { onSearchClick?: () => void 
                                       </div>
                                       {thread.branch && (
                                         <span
-                                          className={`pointer-events-none absolute inset-0 inline-flex items-center gap-0.5 rounded-sm bg-sidebar px-2 text-[10px] opacity-0 transition-opacity group-hover/thread:opacity-100 ${
-                                            isHighlighted
-                                              ? "text-muted-foreground/70"
-                                              : "text-muted-foreground/50"
-                                          }`}
+                                          className="pointer-events-none absolute inset-y-0 left-0 right-0 z-10 flex items-center justify-end px-2 opacity-0 transition-opacity group-hover/thread:opacity-100"
                                           title={thread.branch}
                                         >
-                                          <GitBranchIcon className="size-2.5 shrink-0" />
-                                          <span className="truncate">
-                                            {formatBranchForDisplay(thread.branch)}
+                                          <span className="inline-flex max-w-full items-center gap-1 rounded-md border border-border bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground shadow-sm">
+                                            <GitBranchIcon className="size-2.5 shrink-0" />
+                                            <span className="truncate">
+                                              {formatBranchForDisplay(thread.branch)}
+                                            </span>
                                           </span>
                                         </span>
                                       )}
