@@ -1782,7 +1782,14 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
 
         yield* Queue.shutdown(context.promptQueue);
 
-        context.query.close();
+        try {
+          context.query.close();
+        } catch (err) {
+          yield* Effect.logWarning("context.query.close() threw during session stop", {
+            threadId: context.internalThreadId,
+            error: String(err),
+          });
+        }
 
         // Interrupt the SDK stream fiber so it doesn't linger after session cleanup.
         if (context.streamFiber) {
@@ -2462,13 +2469,39 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
         yield* Effect.tryPromise({
           try: () => context.query.interrupt(),
           catch: (cause) => toRequestError(threadId, "turn/interrupt", cause),
-        });
+        }).pipe(
+          Effect.timeout("5 seconds"),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("SDK interrupt() timed out or failed", {
+              threadId,
+              cause: Cause.pretty(cause),
+            }),
+          ),
+        );
         // Eagerly mark the session as no longer running so that late-arriving
         // SDK status messages (session.state.changed with state "running")
         // emitted after the interrupt don't flip the orchestration status back
         // to "running".  The adapter-level `interrupted` flag is checked in
         // handleSystemMessage before emitting session.state.changed events.
         context.interrupted = true;
+
+        // Watchdog: if the SDK doesn't emit a result message within 10s after
+        // interrupt, force-complete the turn so the session doesn't stay stuck.
+        if (context.turnState) {
+          const turnIdAtInterrupt = context.turnState.turnId;
+          Effect.runFork(
+            Effect.gen(function* () {
+              yield* Effect.sleep("10 seconds");
+              if (context.turnState?.turnId === turnIdAtInterrupt) {
+                yield* Effect.logWarning(
+                  "Interrupt watchdog: turn did not complete within timeout, force-completing",
+                  { threadId, turnId: turnIdAtInterrupt },
+                );
+                yield* completeTurn(context, "interrupted", "Interrupt timed out — turn force-completed");
+              }
+            }).pipe(Effect.ignore),
+          );
+        }
       });
 
     const readThread: ClaudeCodeAdapterShape["readThread"] = (threadId) =>

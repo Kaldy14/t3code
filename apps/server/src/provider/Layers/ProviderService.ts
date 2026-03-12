@@ -431,8 +431,17 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
         const routed = yield* resolveRoutableSession({
           threadId: input.threadId,
           operation: "ProviderService.interruptTurn",
-          allowRecovery: true,
+          // Don't recover — if the adapter lost the session, there is no running
+          // turn to interrupt and spawning a new session just to call interrupt()
+          // on it creates zombie processes.
+          allowRecovery: false,
         });
+        if (!routed.isActive) {
+          yield* Effect.logWarning("interruptTurn: no active adapter session, skipping interrupt", {
+            threadId: input.threadId,
+          });
+          return;
+        }
         yield* routed.adapter.interruptTurn(routed.threadId, input.turnId);
         yield* analytics.record("provider.turn.interrupted", {
           provider: routed.adapter.provider,

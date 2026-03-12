@@ -538,7 +538,27 @@ const make = Effect.gen(function* () {
     }
 
     // Orchestration turn ids are not provider turn ids, so interrupt by session.
-    yield* providerService.interruptTurn({ threadId: event.payload.threadId });
+    yield* providerService
+      .interruptTurn({ threadId: event.payload.threadId })
+      .pipe(
+        Effect.timeout("10 seconds"),
+        Effect.catchCause((cause) =>
+          Effect.gen(function* () {
+            yield* Effect.logWarning("providerService.interruptTurn failed; attempting session stop as fallback", {
+              threadId: event.payload.threadId,
+              cause: Cause.pretty(cause),
+            });
+            yield* appendProviderFailureActivity({
+              threadId: event.payload.threadId,
+              kind: "provider.turn.interrupt.failed",
+              summary: "Turn interrupt failed — session may need to be stopped",
+              detail: "The interrupt request timed out or errored. Try stopping the session.",
+              turnId: event.payload.turnId ?? null,
+              createdAt: event.payload.createdAt,
+            });
+          }),
+        ),
+      );
   });
 
   const processApprovalResponseRequested = Effect.fnUntraced(function* (
@@ -642,7 +662,15 @@ const make = Effect.gen(function* () {
 
     const now = event.payload.createdAt;
     if (thread.session && thread.session.status !== "stopped") {
-      yield* providerService.stopSession({ threadId: thread.id });
+      yield* providerService.stopSession({ threadId: thread.id }).pipe(
+        Effect.timeout("10 seconds"),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("providerService.stopSession failed during session stop; forcing stopped state", {
+            threadId: thread.id,
+            cause: Cause.pretty(cause),
+          }),
+        ),
+      );
     }
 
     yield* setThreadSession({
