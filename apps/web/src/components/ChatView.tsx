@@ -1471,10 +1471,19 @@ export default function ChatView({ threadId }: ChatViewProps) {
     (showPlanFollowUpPrompt && activeProposedPlan !== null) ||
     queuedMessage !== null;
   const composerFooterHasWideActions = showPlanFollowUpPrompt || activePendingProgress !== null;
+  // Sync the composer editor when the active pending question identity changes
+  // (e.g. advancing to the next question or a new user-input request arriving).
+  // Must NOT fire on every custom-answer keystroke — only on question transitions.
+  const prevPendingQuestionKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!activePendingProgress) {
-      return;
-    }
+    const questionKey = activePendingUserInput
+      ? `${activePendingUserInput.requestId}:${activePendingQuestionIndex}`
+      : null;
+    if (questionKey === prevPendingQuestionKeyRef.current) return;
+    prevPendingQuestionKeyRef.current = questionKey;
+
+    if (!activePendingProgress) return;
+
     promptRef.current = activePendingProgress.customAnswer;
     setComposerCursor(activePendingProgress.customAnswer.length);
     setComposerTrigger(
@@ -1487,7 +1496,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       ),
     );
     setComposerHighlightedItemId(null);
-  }, [activePendingProgress, activePendingUserInput?.requestId]);
+  }, [activePendingProgress, activePendingUserInput, activePendingQuestionIndex]);
   useEffect(() => {
     attachmentPreviewHandoffByMessageIdRef.current = attachmentPreviewHandoffByMessageId;
   }, [attachmentPreviewHandoffByMessageId]);
@@ -4192,9 +4201,17 @@ export default function ChatView({ threadId }: ChatViewProps) {
 
   const onPromptChange = useCallback(
     (nextPrompt: string, nextCursor: number, cursorAdjacentToMention: boolean) => {
-      // When pending user input exists, custom answers are handled by inline
-      // inputs in the timeline card — ignore composer changes.
       if (activePendingUserInput) {
+        // Route to the custom answer handler for the active pending question
+        const questionId = activePendingProgress?.activeQuestion?.id;
+        if (questionId) {
+          onChangeActivePendingUserInputCustomAnswer(
+            questionId,
+            nextPrompt,
+            nextCursor,
+            cursorAdjacentToMention,
+          );
+        }
         return;
       }
       promptRef.current = nextPrompt;
@@ -4209,7 +4226,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
             ),
       );
     },
-    [activePendingUserInput, setPrompt],
+    [
+      activePendingUserInput,
+      activePendingProgress?.activeQuestion?.id,
+      onChangeActivePendingUserInputCustomAnswer,
+      setPrompt,
+    ],
   );
 
   const onComposerCommandKey = (
@@ -4532,7 +4554,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
                   className={cn(
                     "relative px-3 pb-2 sm:px-4",
                     hasComposerHeader ? "pt-2.5 sm:pt-3" : "pt-3.5 sm:pt-4",
-                    pendingUserInputs.length > 0 && "hidden",
                   )}
                 >
                   {composerMenuOpen && !isComposerApprovalState && (
@@ -6607,13 +6628,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
       });
     }
 
-    if (pendingUserInput) {
-      nextRows.push({
-        kind: "user-input",
-        id: `user-input:${pendingUserInput.requestId}`,
-        createdAt: pendingUserInput.createdAt,
-      });
-    }
+    // User-input questions are handled in the composer panel, not inline in the timeline.
 
     if (isWorking) {
       nextRows.push({
