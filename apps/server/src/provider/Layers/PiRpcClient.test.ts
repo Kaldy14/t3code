@@ -6,6 +6,7 @@ import {
   buildPiTurnCommand,
   classifyPiStdoutMessage,
   extractAssistantTextDelta,
+  extractPiAgentEndError,
   extractAvailableModels,
   extractForkMessages,
   extractLastAssistantText,
@@ -36,6 +37,38 @@ const modelSelectionWithThinking = (value: string | undefined) =>
     model: "openai/gpt-5",
     options: value === undefined ? [] : [{ id: "thinking", value }],
   }) as unknown as Parameters<typeof resolvePiThinkingLevel>[0];
+
+describe("extractPiAgentEndError", () => {
+  it("returns a concise terminal assistant error", () => {
+    expect(
+      extractPiAgentEndError(
+        asEvent({
+          type: "agent_end",
+          willRetry: false,
+          messages: [
+            {
+              role: "assistant",
+              stopReason: "error",
+              errorMessage: "OAuth refresh failed\nstack trace",
+            },
+          ],
+        }),
+      ),
+    ).toBe("OAuth refresh failed");
+  });
+
+  it("ignores successful terminal messages", () => {
+    expect(
+      extractPiAgentEndError(
+        asEvent({
+          type: "agent_end",
+          willRetry: false,
+          messages: [{ role: "assistant", stopReason: "stop" }],
+        }),
+      ),
+    ).toBeNull();
+  });
+});
 
 describe("tryParsePiJsonObject", () => {
   it("parses a JSON object line", () => {

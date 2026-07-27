@@ -49,6 +49,7 @@ import {
   buildPiTurnCommand,
   extractAssistantTextDelta,
   extractForkMessages,
+  extractPiAgentEndError,
   extractReasoningTextDelta,
   extractSessionFile,
   makePiRpcTransport,
@@ -92,8 +93,14 @@ function approvalGateForRuntimeMode(
   return { gate: false };
 }
 
+export function expandPiApprovalExtensionCandidate(candidate: string): ReadonlyArray<string> {
+  const unpacked = candidate.replace(/([\\/])app\.asar([\\/])/, "$1app.asar.unpacked$2");
+  return unpacked === candidate ? [candidate] : [unpacked, candidate];
+}
+
 // dev resolves ../assets (running from src); the vp-pack build copies the asset
-// next to the bundle, so prod resolves ./assets
+// next to the bundle. Electron's fs can see the virtual app.asar path, but the
+// external Pi process needs the corresponding app.asar.unpacked path.
 const APPROVAL_EXTENSION_CANDIDATES: ReadonlyArray<string> = (() => {
   const resolve = (relative: string): string | undefined => {
     try {
@@ -102,9 +109,9 @@ const APPROVAL_EXTENSION_CANDIDATES: ReadonlyArray<string> = (() => {
       return undefined;
     }
   };
-  return [resolve("../assets/pi/t3-approvals.ts"), resolve("./assets/pi/t3-approvals.ts")].filter(
-    (value): value is string => value !== undefined,
-  );
+  return [resolve("../assets/pi/t3-approvals.ts"), resolve("./assets/pi/t3-approvals.ts")]
+    .filter((value): value is string => value !== undefined)
+    .flatMap(expandPiApprovalExtensionCandidate);
 })();
 
 interface PiToolItem {
@@ -522,9 +529,14 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
           // finalize only on the terminal end, since a retry isn't a user interrupt
           if (event.willRetry) return;
           if (context.turnState) {
+            const terminalError = extractPiAgentEndError(event);
             const state =
-              context.interruptingTurnId === context.turnState.turnId ? "interrupted" : "completed";
-            yield* completeTurn(context, state);
+              context.interruptingTurnId === context.turnState.turnId
+                ? "interrupted"
+                : terminalError
+                  ? "failed"
+                  : "completed";
+            yield* completeTurn(context, state, terminalError ?? undefined);
           }
           return;
         }

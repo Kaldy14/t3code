@@ -79,6 +79,24 @@ export function extractReasoningTextDelta(event: AgentSessionEvent): string | nu
   return typeof delta === "string" ? delta : null;
 }
 
+export function extractPiAgentEndError(event: AgentSessionEvent): string | null {
+  if (event.type !== "agent_end" || !Array.isArray(event.messages)) return null;
+
+  for (let index = event.messages.length - 1; index >= 0; index -= 1) {
+    const message = event.messages[index] as unknown;
+    if (!message || typeof message !== "object") continue;
+    const record = message as Record<string, unknown>;
+    if (record["role"] !== "assistant" || record["stopReason"] !== "error") continue;
+
+    const errorMessage = record["errorMessage"];
+    if (typeof errorMessage !== "string") return "Pi model request failed.";
+    const firstLine = errorMessage.split(/\r?\n/, 1)[0]?.trim();
+    return firstLine ? firstLine.slice(0, 2_000) : "Pi model request failed.";
+  }
+
+  return null;
+}
+
 // slugs are provider/id; keep any extra "/" in the id
 export function splitPiModelSlug(slug: string): { provider: string; id: string } | null {
   const trimmed = slug.trim();

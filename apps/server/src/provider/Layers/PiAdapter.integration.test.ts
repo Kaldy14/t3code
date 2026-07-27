@@ -289,6 +289,49 @@ it.layer(HarnessLayer)("PiAdapter integration", (it) => {
       }),
   );
 
+  it.effect("surfaces a terminal Pi model error as a failed turn", () =>
+    Effect.gen(function* () {
+      const { adapter, fake } = yield* makePiAdapterForTest(enabledSettings());
+      const threadId = ThreadId.make("pi-int-model-error");
+      const collected = yield* collectEvents(
+        adapter,
+        threadId,
+        (event) => event.type === "turn.completed",
+      );
+      yield* adapter.startSession({
+        threadId,
+        provider: PI,
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId, input: "fail", attachments: [] });
+      yield* fake.pushEvent({ type: "turn_start" } as AgentSessionEvent);
+      yield* fake.pushEvent({
+        type: "agent_end",
+        willRetry: false,
+        messages: [
+          {
+            role: "assistant",
+            stopReason: "error",
+            errorMessage: "Provider authentication expired\nstack trace",
+          },
+        ],
+      } as AgentSessionEvent);
+
+      const events = yield* Fiber.join(collected.fiber).pipe(
+        Effect.flatMap(() => Ref.get(collected.store)),
+      );
+      const completed = events.find((event) => event.type === "turn.completed");
+      expect(completed?.type).toBe("turn.completed");
+      if (completed?.type === "turn.completed") {
+        expect(completed.payload.state).toBe("failed");
+        expect(completed.payload.errorMessage).toBe("Provider authentication expired");
+      }
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("maps a tool execution lifecycle to item events", () =>
     Effect.gen(function* () {
       const { adapter, fake } = yield* makePiAdapterForTest(enabledSettings());

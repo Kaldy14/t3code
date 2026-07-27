@@ -6,10 +6,30 @@ import {
   buildPiUserInputResponse,
   classifyPiApprovalRequestType,
   classifyPiToolItemType,
+  expandPiApprovalExtensionCandidate,
   isPiApprovalConfirmed,
   parseNumberedList,
   summarizePiToolArgs,
 } from "./PiAdapter.ts";
+
+describe("expandPiApprovalExtensionCandidate", () => {
+  it("prefers the unpacked Electron asset before the virtual asar path", () => {
+    expect(
+      expandPiApprovalExtensionCandidate(
+        "/Applications/T3 Code.app/Contents/Resources/app.asar/apps/server/dist/assets/pi/t3-approvals.ts",
+      ),
+    ).toEqual([
+      "/Applications/T3 Code.app/Contents/Resources/app.asar.unpacked/apps/server/dist/assets/pi/t3-approvals.ts",
+      "/Applications/T3 Code.app/Contents/Resources/app.asar/apps/server/dist/assets/pi/t3-approvals.ts",
+    ]);
+  });
+
+  it("leaves development paths unchanged", () => {
+    expect(
+      expandPiApprovalExtensionCandidate("/repo/apps/server/src/assets/pi/t3-approvals.ts"),
+    ).toEqual(["/repo/apps/server/src/assets/pi/t3-approvals.ts"]);
+  });
+});
 
 describe("classifyPiToolItemType", () => {
   it("maps shell / exec tools to command execution", () => {
