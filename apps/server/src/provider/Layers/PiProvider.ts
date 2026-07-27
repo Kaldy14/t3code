@@ -2,7 +2,6 @@ import {
   type ModelCapabilities,
   type PiSettings,
   type ServerProviderModel,
-  ProviderDriverKind,
 } from "@t3tools/contracts";
 import { createModelCapabilities } from "@t3tools/shared/model";
 import * as DateTime from "effect/DateTime";
@@ -25,8 +24,6 @@ import {
   makePiRpcTransport,
   piModelInfoToServerModel,
 } from "./PiRpcClient.ts";
-
-const PROVIDER = ProviderDriverKind.make("pi");
 
 const PI_PRESENTATION = {
   displayName: "Pi",
@@ -81,7 +78,7 @@ const modelsFromSettings = (
   piSettings: PiSettings,
   discovered: ReadonlyArray<ServerProviderModel>,
 ): ReadonlyArray<ServerProviderModel> =>
-  providerModelsFromSettings(discovered, PROVIDER, piSettings.customModels, EMPTY_CAPABILITIES);
+  providerModelsFromSettings(discovered, piSettings.customModels, EMPTY_CAPABILITIES);
 
 export const buildInitialPiProviderSnapshot = Effect.fn("buildInitialPiProviderSnapshot")(
   function* (piSettings: PiSettings) {
