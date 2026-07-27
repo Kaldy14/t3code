@@ -476,8 +476,8 @@ importers:
         version: 2.9.0
     devDependencies:
       '@earendil-works/pi-coding-agent':
-        specifier: ^0.80.2
-        version: 0.80.10(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(bufferutil@4.1.0)(utf-8-validate@6.0.6)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
+        specifier: ^0.82.1
+        version: 0.82.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(bufferutil@4.1.0)(utf-8-validate@6.0.6)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
       '@effect/vitest':
         specifier: 4.0.0-beta.102
         version: 4.0.0-beta.102(patch_hash=a607339aab944136a084a05f159aa0f5a69776934d4b835dab8f9992f1c13425)(effect@4.0.0-beta.102(patch_hash=71215759e1ac0a7f65d7b75d816986687ae6c3a6cba02d928d184ca71790d488))
@@ -1993,22 +1993,22 @@ packages:
   '@drizzle-team/brocli@0.12.0':
     resolution: {integrity: sha512-mlUE+rZ8CatQekLhnaiN91Iemdd+e2gFKooGlnRB3oPTL3VghLfX24dx7HrzMNeC1JrIB/0kpsfyty3f5HNfxQ==}
 
-  '@earendil-works/pi-agent-core@0.80.10':
-    resolution: {integrity: sha512-nwnOR3SuLYGRFfyQm8ri4Nj5VGVAvAM9GuqQd3u7BUQj0d6hmD2F8w7OHAAjThE3CuySIdM+v8E22QJG6/RfCg==}
+  '@earendil-works/pi-agent-core@0.82.1':
+    resolution: {integrity: sha512-Z3kloziJIE2dmrisRckZX8zDca/gIv9/YdFAzeoqpHiLV2wsni6bL4hInNSjVKLbqT+4kqLIkph2JQLKvSepjg==}
     engines: {node: '>=22.19.0'}
 
-  '@earendil-works/pi-ai@0.80.10':
-    resolution: {integrity: sha512-Moe/H8c87yacDGK9dPbWphZNjVsrb3nTrIHycOQJAkFEnY9PYxOOd74+ny44kATfPU9Dm7aTHefar3pZF+UKUA==}
-    engines: {node: '>=22.19.0'}
-    hasBin: true
-
-  '@earendil-works/pi-coding-agent@0.80.10':
-    resolution: {integrity: sha512-aL4apbupCHiVLSXASXvRzH4Q2vmtfrDa+0s909CJuVu/GgGylbDzr7oyF1mPmip5E+VxYYxKWmph4hV04wUcQg==}
+  '@earendil-works/pi-ai@0.82.1':
+    resolution: {integrity: sha512-3WFYRhEp3lQB3444EhPMBcM7zSaEUE3eJgHOR7s4081NLqbw/FsWilIKWXSua0Gv3sRr7m9xMidR3pPDE7jI/A==}
     engines: {node: '>=22.19.0'}
     hasBin: true
 
-  '@earendil-works/pi-tui@0.80.10':
-    resolution: {integrity: sha512-c2JO29PbhKPEQ6fgHQKAl0WhwuFqzWfzspMmP+8B5tpDuP+0mvarRbKKg8gq4b+pQx/QX+6aVS4ko7deoyjQjg==}
+  '@earendil-works/pi-coding-agent@0.82.1':
+    resolution: {integrity: sha512-zbkAhoIuDPMF3pKuja0ajZabrMWU29FUMV9A/XMXT/XC1yXs5xt6t6t13GogQFsDrDqbFP4DkZQO1w8rWRAzYA==}
+    engines: {node: '>=22.19.0'}
+    hasBin: true
+
+  '@earendil-works/pi-tui@0.82.1':
+    resolution: {integrity: sha512-9yN8hALfKaxZq7n54EMxqhFCWnMi6LHkraMJ/1YjHiATq75XrI6XDMVppn9EDtiK7Fks8hUe1SDXUTrIvwRWfQ==}
     engines: {node: '>=22.19.0'}
 
   '@effect/atom-react@4.0.0-beta.102':
@@ -11031,7 +11031,7 @@ snapshots:
       '@aws-crypto/sha256-js': 5.2.0
       '@aws-crypto/supports-web-crypto': 5.2.0
       '@aws-crypto/util': 5.2.0
-      '@aws-sdk/types': 3.973.10
+      '@aws-sdk/types': 3.974.2
       '@aws-sdk/util-locate-window': 3.965.5
       '@smithy/util-utf8': 2.3.0
       tslib: 2.8.1
@@ -11039,7 +11039,7 @@ snapshots:
   '@aws-crypto/sha256-js@5.2.0':
     dependencies:
       '@aws-crypto/util': 5.2.0
-      '@aws-sdk/types': 3.973.10
+      '@aws-sdk/types': 3.974.2
       tslib: 2.8.1
 
   '@aws-crypto/supports-web-crypto@5.2.0':
@@ -11056,17 +11056,17 @@ snapshots:
     dependencies:
       '@aws-crypto/sha256-browser': 5.2.0
       '@aws-crypto/sha256-js': 5.2.0
-      '@aws-sdk/core': 3.974.17
+      '@aws-sdk/core': 3.977.1
       '@aws-sdk/credential-provider-node': 3.972.51
       '@aws-sdk/eventstream-handler-node': 3.972.30
       '@aws-sdk/middleware-eventstream': 3.972.25
       '@aws-sdk/middleware-websocket': 3.972.43
       '@aws-sdk/token-providers': 3.1048.0
-      '@aws-sdk/types': 3.973.10
-      '@smithy/core': 3.24.6
-      '@smithy/fetch-http-handler': 5.4.6
+      '@aws-sdk/types': 3.974.2
+      '@smithy/core': 3.30.0
+      '@smithy/fetch-http-handler': 5.6.11
       '@smithy/node-http-handler': 4.7.7
-      '@smithy/types': 4.14.3
+      '@smithy/types': 4.16.1
       tslib: 2.8.1
 
   '@aws-sdk/client-cognito-identity@3.1062.0':
@@ -11255,27 +11255,27 @@ snapshots:
 
   '@aws-sdk/signature-v4-multi-region@3.996.31':
     dependencies:
-      '@aws-sdk/types': 3.973.10
+      '@aws-sdk/types': 3.974.2
       '@smithy/signature-v4': 5.4.6
-      '@smithy/types': 4.14.3
+      '@smithy/types': 4.16.1
       tslib: 2.8.1
 
   '@aws-sdk/token-providers@3.1048.0':
     dependencies:
-      '@aws-sdk/core': 3.974.17
+      '@aws-sdk/core': 3.977.1
       '@aws-sdk/nested-clients': 3.997.16
-      '@aws-sdk/types': 3.973.10
-      '@smithy/core': 3.24.6
-      '@smithy/types': 4.14.3
+      '@aws-sdk/types': 3.974.2
+      '@smithy/core': 3.30.0
+      '@smithy/types': 4.16.1
       tslib: 2.8.1
 
   '@aws-sdk/token-providers@3.1062.0':
     dependencies:
-      '@aws-sdk/core': 3.974.17
+      '@aws-sdk/core': 3.977.1
       '@aws-sdk/nested-clients': 3.997.16
-      '@aws-sdk/types': 3.973.10
-      '@smithy/core': 3.24.6
-      '@smithy/types': 4.14.3
+      '@aws-sdk/types': 3.974.2
+      '@smithy/core': 3.30.0
+      '@smithy/types': 4.16.1
       tslib: 2.8.1
 
   '@aws-sdk/types@3.973.10':
@@ -11294,7 +11294,7 @@ snapshots:
 
   '@aws-sdk/xml-builder@3.972.27':
     dependencies:
-      '@smithy/types': 4.14.3
+      '@smithy/types': 4.16.1
       fast-xml-parser: 5.7.3
       tslib: 2.8.1
 
@@ -12120,9 +12120,10 @@ snapshots:
 
   '@drizzle-team/brocli@0.12.0': {}
 
-  '@earendil-works/pi-agent-core@0.80.10(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(bufferutil@4.1.0)(utf-8-validate@6.0.6)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)':
+  '@earendil-works/pi-agent-core@0.82.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(bufferutil@4.1.0)(utf-8-validate@6.0.6)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)':
     dependencies:
-      '@earendil-works/pi-ai': 0.80.10(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(bufferutil@4.1.0)(utf-8-validate@6.0.6)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
+      '@earendil-works/pi-ai': 0.82.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(bufferutil@4.1.0)(utf-8-validate@6.0.6)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
+      diff: 8.0.4
       ignore: 7.0.5
       typebox: 1.1.38
       yaml: 2.9.0
@@ -12134,7 +12135,7 @@ snapshots:
       - ws
       - zod
 
-  '@earendil-works/pi-ai@0.80.10(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(bufferutil@4.1.0)(utf-8-validate@6.0.6)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)':
+  '@earendil-works/pi-ai@0.82.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(bufferutil@4.1.0)(utf-8-validate@6.0.6)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)':
     dependencies:
       '@anthropic-ai/sdk': 0.91.1(zod@4.4.3)
       '@aws-sdk/client-bedrock-runtime': 3.1048.0
@@ -12155,11 +12156,11 @@ snapshots:
       - ws
       - zod
 
-  '@earendil-works/pi-coding-agent@0.80.10(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(bufferutil@4.1.0)(utf-8-validate@6.0.6)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)':
+  '@earendil-works/pi-coding-agent@0.82.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(bufferutil@4.1.0)(utf-8-validate@6.0.6)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)':
     dependencies:
-      '@earendil-works/pi-agent-core': 0.80.10(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(bufferutil@4.1.0)(utf-8-validate@6.0.6)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
-      '@earendil-works/pi-ai': 0.80.10(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(bufferutil@4.1.0)(utf-8-validate@6.0.6)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
-      '@earendil-works/pi-tui': 0.80.10
+      '@earendil-works/pi-agent-core': 0.82.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(bufferutil@4.1.0)(utf-8-validate@6.0.6)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
+      '@earendil-works/pi-ai': 0.82.1(@modelcontextprotocol/sdk@1.29.0(zod@4.4.3))(bufferutil@4.1.0)(utf-8-validate@6.0.6)(ws@8.21.0(bufferutil@4.1.0)(utf-8-validate@6.0.6))(zod@4.4.3)
+      '@earendil-works/pi-tui': 0.82.1
       '@silvia-odwyer/photon-node': 0.3.4
       chalk: 5.6.2
       cross-spawn: 7.0.6
@@ -12185,7 +12186,7 @@ snapshots:
       - ws
       - zod
 
-  '@earendil-works/pi-tui@0.80.10':
+  '@earendil-works/pi-tui@0.82.1':
     dependencies:
       get-east-asian-width: 1.6.0
       marked: 18.0.5
@@ -14683,8 +14684,8 @@ snapshots:
 
   '@smithy/fetch-http-handler@5.4.6':
     dependencies:
-      '@smithy/core': 3.24.6
-      '@smithy/types': 4.14.3
+      '@smithy/core': 3.30.0
+      '@smithy/types': 4.16.1
       tslib: 2.8.1
 
   '@smithy/fetch-http-handler@5.6.11':
@@ -14704,14 +14705,14 @@ snapshots:
 
   '@smithy/node-http-handler@4.7.3':
     dependencies:
-      '@smithy/core': 3.24.6
-      '@smithy/types': 4.14.3
+      '@smithy/core': 3.30.0
+      '@smithy/types': 4.16.1
       tslib: 2.8.1
 
   '@smithy/node-http-handler@4.7.7':
     dependencies:
-      '@smithy/core': 3.24.6
-      '@smithy/types': 4.14.3
+      '@smithy/core': 3.30.0
+      '@smithy/types': 4.16.1
       tslib: 2.8.1
 
   '@smithy/shared-ini-file-loader@4.5.6':
@@ -14721,8 +14722,8 @@ snapshots:
 
   '@smithy/signature-v4@5.4.6':
     dependencies:
-      '@smithy/core': 3.24.6
-      '@smithy/types': 4.14.3
+      '@smithy/core': 3.30.0
+      '@smithy/types': 4.16.1
       tslib: 2.8.1
 
   '@smithy/signature-v4@5.6.10':

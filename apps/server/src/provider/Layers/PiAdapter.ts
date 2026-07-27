@@ -73,6 +73,7 @@ const PROVIDER = ProviderDriverKind.make("pi");
 const PI_STATE_TIMEOUT_MS = 5_000;
 const PI_COMMANDS_TIMEOUT_MS = 5_000;
 const PI_MESSAGES_TIMEOUT_MS = 5_000;
+const PI_ABORT_TIMEOUT_MS = 5_000;
 // fork/new_session rebinds to a new session file — give it more headroom
 const PI_FORK_TIMEOUT_MS = 15_000;
 const PI_MODEL_OPTIONS_TIMEOUT_MS = 5_000;
@@ -141,6 +142,7 @@ interface PiSessionContext {
   turnState: PiTurnState | undefined;
   readonly turns: Array<{ id: TurnId; items: Array<PiToolItem> }>;
   stopped: boolean;
+  interruptingTurnId: TurnId | undefined;
   // slug the pi process is running; used to issue set_model only on change
   currentModel: string | undefined;
   appliedThinkingLevel: PiThinkingLevel | undefined;
@@ -329,6 +331,9 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
       const turnState = context.turnState;
       if (!turnState) return;
       context.turnState = undefined;
+      if (context.interruptingTurnId === turnState.turnId) {
+        context.interruptingTurnId = undefined;
+      }
       context.turns.push({ id: turnState.turnId, items: [...turnState.items] });
 
       const updatedAt = yield* nowIso;
@@ -517,7 +522,9 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
           // finalize only on the terminal end, since a retry isn't a user interrupt
           if (event.willRetry) return;
           if (context.turnState) {
-            yield* completeTurn(context, "completed");
+            const state =
+              context.interruptingTurnId === context.turnState.turnId ? "interrupted" : "completed";
+            yield* completeTurn(context, state);
           }
           return;
         }
@@ -677,6 +684,36 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
         );
       }
       context.pendingUserInputs.clear();
+    });
+
+  const abortActiveTurn = (
+    context: PiSessionContext,
+    errorMessage: string,
+  ): Effect.Effect<void, ProviderAdapterRequestError> =>
+    Effect.gen(function* () {
+      const turnState = context.turnState;
+      if (!turnState) return;
+
+      context.interruptingTurnId = turnState.turnId;
+      const response = yield* context.transport.request(
+        { type: "abort" },
+        `pi-abort-${yield* nextUuid}`,
+        PI_ABORT_TIMEOUT_MS,
+      );
+      const turnAlreadyCompleted = context.turnState?.turnId !== turnState.turnId;
+      if (!piResponseSucceeded(response, "abort") && !turnAlreadyCompleted) {
+        context.interruptingTurnId = undefined;
+        return yield* new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "abort",
+          detail: "Pi rejected the abort request or did not respond before the timeout.",
+        });
+      }
+
+      yield* cancelPendingExtensionRequests(context);
+      if (context.turnState?.turnId === turnState.turnId) {
+        yield* completeTurn(context, "interrupted", errorMessage);
+      }
     });
 
   const stopSessionInternal = (
@@ -930,6 +967,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
       turnState: undefined,
       turns: [],
       stopped: false,
+      interruptingTurnId: undefined,
       currentModel: modelSelection?.model,
       appliedThinkingLevel: thinkingLevel,
     };
@@ -1077,7 +1115,17 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
     yield* context.transport
       .writeCommand(buildPiTurnCommand({ isMidTurn, message: promptText, images }))
       .pipe(
-        Effect.catchCause(() => completeTurn(context, "failed", "Failed to send message to Pi.")),
+        Effect.catchCause((cause) =>
+          Effect.gen(function* () {
+            yield* completeTurn(context, "failed", "Failed to send message to Pi.");
+            return yield* new ProviderAdapterProcessError({
+              provider: PROVIDER,
+              threadId: context.session.threadId,
+              detail: "Failed to send message to Pi.",
+              cause,
+            });
+          }),
+        ),
       );
 
     return {
@@ -1090,11 +1138,12 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
   });
 
   const interruptTurn: PiAdapterShape["interruptTurn"] = Effect.fn("interruptTurn")(
-    function* (threadId) {
+    function* (threadId, requestedTurnId) {
       const context = yield* requireSession(threadId);
-      yield* Effect.ignore(context.transport.writeCommand({ type: "abort" }));
-      // settle bridged requests so Pi isn't left blocked (matches Cursor)
-      yield* cancelPendingExtensionRequests(context);
+      if (requestedTurnId !== undefined && context.turnState?.turnId !== requestedTurnId) {
+        return;
+      }
+      yield* abortActiveTurn(context, "Turn interrupted.");
     },
   );
 
@@ -1181,8 +1230,7 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
 
       // forking mid-stream is undefined — abort/finalize any live turn first
       if (context.turnState) {
-        yield* Effect.ignore(context.transport.writeCommand({ type: "abort" }));
-        yield* completeTurn(context, "interrupted", "Turn interrupted for rollback.");
+        yield* abortActiveTurn(context, "Turn interrupted for rollback.");
       }
 
       const forkResponse = yield* context.transport.request(
@@ -1190,6 +1238,13 @@ export const makePiAdapter = Effect.fn("makePiAdapter")(function* (
         `pi-fork-messages-${yield* nextUuid}`,
         PI_MESSAGES_TIMEOUT_MS,
       );
+      if (!piResponseSucceeded(forkResponse, "get_fork_messages")) {
+        return yield* new ProviderAdapterRequestError({
+          provider: PROVIDER,
+          method: "get_fork_messages",
+          detail: "Pi rejected the history request or did not respond before the timeout.",
+        });
+      }
       const userMessages = extractForkMessages(forkResponse);
       const target = resolveForkTargetEntryId(userMessages, numTurns);
 

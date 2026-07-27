@@ -42,6 +42,7 @@ interface FakePiTransport {
   readonly transport: PiRpcTransport;
   readonly commands: Array<RpcCommand>;
   readonly extensionResponses: Array<RpcExtensionUIResponse>;
+  readonly failNextWrite: (message?: string) => void;
   readonly pushEvent: (event: AgentSessionEvent) => Effect.Effect<void>;
   readonly pushExtensionUI: (request: RpcExtensionUIRequest) => Effect.Effect<void>;
   readonly setResponse: (commandType: string, response: RpcResponse) => void;
@@ -54,6 +55,7 @@ const makeFakePiRpcTransport = Effect.gen(function* () {
   const commands: Array<RpcCommand> = [];
   const extensionResponses: Array<RpcExtensionUIResponse> = [];
   const responses = new Map<string, RpcResponse>();
+  let nextWriteFailure: Error | undefined;
   responses.set(
     "get_state",
     asResponse({
@@ -74,17 +76,37 @@ const makeFakePiRpcTransport = Effect.gen(function* () {
       data: { commands: [{ name: "t3-approval-gate", source: "extension" }] },
     }),
   );
+  responses.set(
+    "abort",
+    asResponse({
+      type: "response",
+      id: "x",
+      command: "abort",
+      success: true,
+    }),
+  );
 
   const transport: PiRpcTransport = {
     writeCommand: (command) =>
-      Effect.sync(() => {
-        commands.push(command);
+      Effect.suspend(() => {
+        if (nextWriteFailure) {
+          const failure = nextWriteFailure;
+          nextWriteFailure = undefined;
+          return Effect.die(failure);
+        }
+        return Effect.sync(() => {
+          commands.push(command);
+        });
       }),
     writeExtensionResponse: (response) =>
       Effect.sync(() => {
         extensionResponses.push(response);
       }),
-    request: (command) => Effect.succeed(responses.get((command as { type: string }).type)),
+    request: (command) =>
+      Effect.sync(() => {
+        commands.push(command);
+        return responses.get((command as { type: string }).type);
+      }),
     messages,
     kill: Effect.void,
   };
@@ -93,6 +115,9 @@ const makeFakePiRpcTransport = Effect.gen(function* () {
     transport,
     commands,
     extensionResponses,
+    failNextWrite: (message = "Pi write failed") => {
+      nextWriteFailure = new Error(message);
+    },
     pushEvent: (event) => Queue.offer(messages, { _tag: "event", event }).pipe(Effect.asVoid),
     pushExtensionUI: (request) =>
       Queue.offer(messages, { _tag: "extension-ui", request }).pipe(Effect.asVoid),
@@ -506,6 +531,113 @@ it.layer(HarnessLayer)("PiAdapter integration", (it) => {
       const turnStarts = events.filter((event) => event.type === "turn.started");
       expect(turnStarts.length).toBe(1);
       expect(fake.commands.some((command) => command.type === "steer")).toBe(true);
+    }),
+  );
+
+  it.effect("fails the turn when writing the prompt fails", () =>
+    Effect.gen(function* () {
+      const { adapter, fake } = yield* makePiAdapterForTest(enabledSettings());
+      const threadId = ThreadId.make("pi-int-write-failure");
+      const collected = yield* collectEvents(
+        adapter,
+        threadId,
+        (event) => event.type === "turn.completed",
+      );
+      yield* adapter.startSession({
+        threadId,
+        provider: PI,
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+      });
+
+      fake.failNextWrite();
+      const result = yield* adapter
+        .sendTurn({ threadId, input: "hello", attachments: [] })
+        .pipe(Effect.result);
+      expect(Result.isFailure(result)).toBe(true);
+      if (Result.isFailure(result)) {
+        expect(result.failure._tag).toBe("ProviderAdapterProcessError");
+      }
+
+      const events = yield* Fiber.join(collected.fiber).pipe(
+        Effect.flatMap(() => Ref.get(collected.store)),
+      );
+      const completed = events.find((event) => event.type === "turn.completed");
+      expect(completed).toBeDefined();
+      if (completed?.type === "turn.completed") {
+        expect(completed.payload.state).toBe("failed");
+      }
+    }),
+  );
+
+  it.effect("acknowledges abort and completes the active turn as interrupted", () =>
+    Effect.gen(function* () {
+      const { adapter, fake } = yield* makePiAdapterForTest(enabledSettings());
+      const threadId = ThreadId.make("pi-int-interrupt");
+      const collected = yield* collectEvents(
+        adapter,
+        threadId,
+        (event) => event.type === "turn.completed",
+      );
+      yield* adapter.startSession({
+        threadId,
+        provider: PI,
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId,
+        input: "keep working",
+        attachments: [],
+      });
+
+      yield* adapter.interruptTurn(threadId, turn.turnId);
+
+      const events = yield* Fiber.join(collected.fiber).pipe(
+        Effect.flatMap(() => Ref.get(collected.store)),
+      );
+      expect(fake.commands.some((command) => command.type === "abort")).toBe(true);
+      const completed = events.find((event) => event.type === "turn.completed");
+      expect(completed).toBeDefined();
+      if (completed?.type === "turn.completed") {
+        expect(completed.payload.state).toBe("interrupted");
+      }
+    }),
+  );
+
+  it.effect("keeps local history when Pi history lookup fails during rollback", () =>
+    Effect.gen(function* () {
+      const { adapter, fake } = yield* makePiAdapterForTest(enabledSettings());
+      const threadId = ThreadId.make("pi-int-rollback-history-failure");
+      const collected = yield* collectEvents(
+        adapter,
+        threadId,
+        (event) => event.type === "turn.completed",
+      );
+      yield* adapter.startSession({
+        threadId,
+        provider: PI,
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+      });
+      yield* adapter.sendTurn({ threadId, input: "remember me", attachments: [] });
+      yield* fake.pushEvent({ type: "agent_end" } as AgentSessionEvent);
+      yield* Fiber.join(collected.fiber);
+      expect((yield* adapter.readThread(threadId)).turns).toHaveLength(1);
+
+      fake.setResponse(
+        "get_fork_messages",
+        asResponse({
+          type: "response",
+          id: "x",
+          command: "get_fork_messages",
+          success: false,
+          error: "history unavailable",
+        }),
+      );
+      const result = yield* adapter.rollbackThread(threadId, 1).pipe(Effect.result);
+      expect(Result.isFailure(result)).toBe(true);
+      expect((yield* adapter.readThread(threadId)).turns).toHaveLength(1);
     }),
   );
 });
