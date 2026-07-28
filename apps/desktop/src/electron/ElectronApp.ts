@@ -9,6 +9,7 @@ import * as Electron from "electron";
 export interface ElectronAppMetadata {
   readonly appVersion: string;
   readonly appPath: string;
+  readonly packageName: string;
   readonly isPackaged: boolean;
   readonly resourcesPath: string;
   readonly runningUnderArm64Translation: boolean;
@@ -109,6 +110,7 @@ export const make = ElectronApp.of({
     return {
       appVersion,
       appPath,
+      packageName: Electron.app.name,
       isPackaged: Electron.app.isPackaged,
       resourcesPath: process.resourcesPath,
       runningUnderArm64Translation: Electron.app.runningUnderARM64Translation === true,

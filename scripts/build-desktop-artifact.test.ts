@@ -87,6 +87,7 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
   it("switches desktop packaging product names to nightly for nightly builds", () => {
     assert.equal(resolveDesktopProductName("0.0.17"), "T3 Code (Alpha)");
     assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "T3 Code (Nightly)");
+    assert.equal(resolveDesktopProductName("0.0.17-pi.1", true), "T3 Code Pi (Alpha)");
   });
 
   it("switches desktop packaging icons to the nightly artwork for nightly versions", () => {
@@ -477,6 +478,38 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
         { name: "T3 Code", schemes: ["t3code", "t3code-dev"] },
       ]);
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
+  );
+
+  it.effect("isolates Pi builds from the official app identity and updater", () =>
+    Effect.gen(function* () {
+      const config = yield* createBuildConfig(
+        "mac",
+        "dmg",
+        "1.2.3-pi.1",
+        false,
+        false,
+        undefined,
+        undefined,
+        true,
+      );
+
+      const mac = config.mac as Record<string, unknown>;
+      assert.equal(config.appId, "com.t3tools.t3code.pi");
+      assert.equal(config.productName, "T3 Code Pi (Alpha)");
+      assert.equal(config.artifactName, "T3-Code-Pi-${version}-${arch}.${ext}");
+      assert.notProperty(config, "publish");
+      assert.deepStrictEqual(mac.protocols, [{ name: "T3 Code", schemes: ["t3code-pi"] }]);
+    }).pipe(
+      Effect.provide(
+        ConfigProvider.layer(
+          ConfigProvider.fromEnv({
+            env: {
+              T3CODE_DESKTOP_UPDATE_REPOSITORY: "pingdotgg/t3code",
+            },
+          }),
+        ),
+      ),
+    ),
   );
 
   it.effect("keeps executable resource editing enabled for unsigned Windows builds", () =>

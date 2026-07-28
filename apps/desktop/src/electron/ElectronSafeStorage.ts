@@ -5,6 +5,8 @@ import * as Schema from "effect/Schema";
 
 import * as Electron from "electron";
 
+import { isPiDesktopDistribution } from "@t3tools/shared/desktopDistribution";
+
 const electronSafeStorageErrorFields = {
   cause: Schema.Defect(),
 };
@@ -63,21 +65,47 @@ export class ElectronSafeStorage extends Context.Service<
   }
 >()("@t3tools/desktop/electron/ElectronSafeStorage") {}
 
-export const make = ElectronSafeStorage.of({
-  isEncryptionAvailable: Effect.try({
-    try: () => Electron.safeStorage.isEncryptionAvailable(),
-    catch: (cause) => new ElectronSafeStorageAvailabilityError({ cause }),
-  }),
-  encryptString: (value) =>
-    Effect.try({
-      try: () => Electron.safeStorage.encryptString(value),
-      catch: (cause) => new ElectronSafeStorageEncryptError({ cause }),
-    }),
-  decryptString: (value) =>
-    Effect.try({
-      try: () => Electron.safeStorage.decryptString(Buffer.from(value)),
-      catch: (cause) => new ElectronSafeStorageDecryptError({ cause }),
-    }),
+export function makeElectronSafeStorage(input: {
+  readonly enabled: boolean;
+  readonly safeStorage: Pick<
+    Electron.SafeStorage,
+    "isEncryptionAvailable" | "encryptString" | "decryptString"
+  >;
+}): ElectronSafeStorage["Service"] {
+  const disabledCause = new Error("Safe storage is disabled for this desktop distribution.");
+
+  return ElectronSafeStorage.of({
+    isEncryptionAvailable: input.enabled
+      ? Effect.try({
+          try: () => input.safeStorage.isEncryptionAvailable(),
+          catch: (cause) => new ElectronSafeStorageAvailabilityError({ cause }),
+        })
+      : Effect.succeed(false),
+    encryptString: (value) =>
+      input.enabled
+        ? Effect.try({
+            try: () => input.safeStorage.encryptString(value),
+            catch: (cause) => new ElectronSafeStorageEncryptError({ cause }),
+          })
+        : Effect.fail(new ElectronSafeStorageEncryptError({ cause: disabledCause })),
+    decryptString: (value) =>
+      input.enabled
+        ? Effect.try({
+            try: () => input.safeStorage.decryptString(Buffer.from(value)),
+            catch: (cause) => new ElectronSafeStorageDecryptError({ cause }),
+          })
+        : Effect.fail(new ElectronSafeStorageDecryptError({ cause: disabledCause })),
+  });
+}
+
+const safeStorageEnabled = !isPiDesktopDistribution({
+  isPackaged: Electron.app.isPackaged,
+  packageName: Electron.app.name,
+});
+
+export const make = makeElectronSafeStorage({
+  enabled: safeStorageEnabled,
+  safeStorage: Electron.safeStorage,
 });
 
 export const layer = Layer.succeed(ElectronSafeStorage, make);

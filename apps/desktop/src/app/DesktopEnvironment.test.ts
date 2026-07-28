@@ -111,6 +111,23 @@ describe("DesktopEnvironment", () => {
     }),
   );
 
+  it.effect("isolates packaged Pi builds from the official desktop identity and state", () =>
+    Effect.gen(function* () {
+      const environment = yield* makeEnvironment({
+        isPackaged: true,
+        packageName: "t3code-pi",
+      });
+
+      assert.equal(environment.displayName, "T3 Code Pi (Alpha)");
+      assert.equal(environment.stateDir, "/Users/alice/.t3/pi-userdata");
+      assert.equal(environment.userDataDirName, "t3code-pi");
+      assert.equal(environment.legacyUserDataDirName, "t3code-pi");
+      assert.equal(environment.appUserModelId, "com.t3tools.t3code.pi");
+      assert.equal(environment.linuxDesktopEntryName, "t3code-pi.desktop");
+      assert.equal(environment.linuxWmClass, "t3code-pi");
+    }),
+  );
+
   it.effect("uses a configured app user model id override", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment(
